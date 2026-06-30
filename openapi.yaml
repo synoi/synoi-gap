@@ -1,0 +1,2134 @@
+openapi: 3.1.0
+info:
+  title: Governed Action Protocol (GAP) Gateway API
+  version: 1.0.0
+  description: |
+    The HTTP surface of a GAP-conformant gateway. Every gate decision produces
+    a content-addressed GapDecisionReceipt (signed at L2+ per
+    `require_signed_receipt`; unsigned at L1). Protocol spec: CC0.
+    Implementation: Apache-2.0.
+
+    GAP governs every action an AI agent takes through a four-phase lifecycle:
+    Declare, Grant, Invoke, Receipt. Every object is a CDRO (Content-addressed,
+    Deterministic, Replayable Object): an envelope whose `oid` is
+    `sha256:<hex>` over the full CDRO envelope minus the 5 excluded fields (oid,
+    gap_version, signature, signature_key_id, supersedes), canonicalized per RFC
+    8785 JCS. If the OID verifies, the content is
+    authentic.
+
+    Key invariants:
+      - Every gate decision MUST produce a receipt, including denials.
+      - Receipts are append-only. Revocation events are themselves CDROs.
+      - The gateway is the sole signer of receipts. Actors do not self-certify.
+      - Every object is scoped to a tenant. CDROs never implicitly cross tenant
+        boundaries. Cross-tenant OID lookups return 404, never 403, so the
+        gateway does not confirm the existence of another tenant's objects.
+
+    Conformance tiers (see `x-gap-conformance-tier` on each operation):
+      - L1 Receipts: declarations, grants, invocations, receipts, L1 revoke.
+        Grant evaluation steps 1-3 only (find, expiry, revocation). NOTE:
+        scope_narrowing is step 4 and is NOT enforced at L1.
+      - L2 Grant Enforcement: full grant evaluation (scope_narrowing,
+        preconditions, limits), list/query endpoints, grant predicate updates.
+      - L3 HITL Workflows: workflow definitions/instances/transitions, at least
+        one channel adapter, signal injection, L2 revocation.
+      - L4 Full PQ + Authorized Axis: hybrid Ed25519 + ML-DSA-65 signatures,
+        authorized_axis classification, transparency-log-anchored revocations,
+        L3 revocation and provisional block, federation handshake (reserved for GAP 1.1 - not required for any conformance tier in GAP 1.0).
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: https://{gateway_host}/v1/gap
+    variables:
+      gateway_host:
+        default: gateway.example.com
+        description: Host of the GAP-conformant gateway.
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: declarations
+    description: Phase 1. Actors advertise what they can do.
+  - name: grants
+    description: Phase 2. Operators authorize actors to invoke capabilities.
+  - name: invocations
+    description: Phase 3. Actors call a capability through the gate.
+  - name: receipts
+    description: Phase 4. The signed audit record for every gate decision.
+  - name: workflows
+    description: HITL multi-stage approval state machines.
+  - name: revocations
+    description: Leveled revocation (L1/L2/L3) and emergency provisional block.
+  - name: keys
+    description: Signing key distribution for receipt verification.
+  - name: channels
+    description: Channel adapter discovery and health.
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # Declarations
+  # ---------------------------------------------------------------------------
+  /declarations:
+    post:
+      tags: [declarations]
+      summary: Publish a capability declaration
+      description: |
+        Stores a `gap:capability_declaration` CDRO. The actor computes its own
+        OID client-side before POSTing (the OID is deterministic over the
+        canonical payload). The returned OID is the actor's identity OID for all
+        subsequent grants and invocations. Include `supersedes` to replace a
+        prior declaration; the prior remains retrievable but the gateway uses
+        the new one for grant evaluation.
+      operationId: createDeclaration
+      x-gap-conformance-tier: L1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclarationCreateRequest'
+      responses:
+        '201':
+          description: Declaration stored. Returns the full CDRO envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityDeclaration'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /declarations/{oid}:
+    get:
+      tags: [declarations]
+      summary: Fetch a declaration by OID
+      description: |
+        Returns the stored declaration CDRO. Returns 404 if not found or if the
+        stored object's tenant_id does not match the authenticated tenant
+        (cross-tenant existence is never confirmed).
+      operationId: getDeclaration
+      x-gap-conformance-tier: L1
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      responses:
+        '200':
+          description: The declaration CDRO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityDeclaration'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Grants
+  # ---------------------------------------------------------------------------
+  /grants:
+    post:
+      tags: [grants]
+      summary: Issue a grant
+      description: |
+        Stores a `gap:capability_grant` CDRO. Grant issuance is restricted to
+        operator-role actors: the gateway MUST verify that the Bearer token's
+        operator OID matches `body.granted_by`. For delegated grants
+        (`parent_grant_oid` present) the gateway verifies the child scope is a
+        subset of the parent and that the parent is unexpired and unrevoked. For
+        safety_class C or physical_safety capabilities with numeric scope
+        constraints, a grant missing the `min_*` sibling of a numeric key MUST
+        be rejected at issuance.
+      operationId: createGrant
+      x-gap-conformance-tier: L1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantCreateRequest'
+      responses:
+        '201':
+          description: Grant stored. Returns the full CDRO envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityGrant'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    get:
+      tags: [grants]
+      summary: List grants for an actor
+      description: |
+        Returns grants scoped to the authenticated tenant, filtered by the query
+        parameters. Implemented at L2 and above.
+      operationId: listGrants
+      x-gap-conformance-tier: L2
+      parameters:
+        - name: actor_oid
+          in: query
+          description: Filter to grants whose grantee.actor_oid matches.
+          schema: { type: string }
+        - name: capability
+          in: query
+          description: Filter to grants whose capability_scopes include this capability.
+          schema: { type: string }
+        - name: status
+          in: query
+          description: Lifecycle status filter.
+          schema:
+            type: string
+            enum: [active, revoked, expired]
+      responses:
+        '200':
+          description: A list of grant CDROs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grants]
+                properties:
+                  grants:
+                    type: array
+                    items: { $ref: '#/components/schemas/CapabilityGrant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /grants/{oid}:
+    get:
+      tags: [grants]
+      summary: Fetch a grant by OID
+      description: |
+        Returns the stored grant CDRO. Returns 404 if not found or if the stored
+        object's tenant_id does not match the authenticated tenant.
+      operationId: getGrant
+      x-gap-conformance-tier: L1
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      responses:
+        '200':
+          description: The grant CDRO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityGrant'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /grants/{oid}/update:
+    post:
+      tags: [grants]
+      summary: Update grant predicates
+      description: |
+        Applies an operator-signed update to a grant's predicates (scope
+        narrowing, preconditions, limits). Implemented at L2 and above. The
+        update must be signed by the operator that issued the grant.
+      operationId: updateGrant
+      x-gap-conformance-tier: L2
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantUpdateRequest'
+      responses:
+        '200':
+          description: The updated grant CDRO (a new OID; supersedes the prior).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityGrant'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ---------------------------------------------------------------------------
+  # Invocations
+  # ---------------------------------------------------------------------------
+  /invocations:
+    post:
+      tags: [invocations]
+      summary: Invoke a capability through the gate
+      description: |
+        Runs an invocation through grant evaluation and emits a
+        `gap:decision_receipt` for every outcome, including denials. Clients
+        SHOULD omit `invoked_at_ms`; the gateway server-stamps it. For
+        physical_safety or safety_class C capabilities a client-supplied
+        timestamp is stored only as `client_claimed_at_ms` and never used as
+        `initiated_at_ms`. If `idempotency_key` is supplied and a prior
+        invocation with the same key exists for this tenant (24h window), the
+        original receipt is returned without re-execution. An invocation that
+        matches a HITL workflow trigger returns 202 with a pending receipt.
+      operationId: invoke
+      x-gap-conformance-tier: L1
+      parameters:
+        - $ref: '#/components/parameters/GapGrantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvocationRequest'
+      responses:
+        '200':
+          description: |
+            Capability executed (`ok`). Receipt attached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvocationOkResponse'
+        '202':
+          description: |
+            Capability requires HITL; a workflow instance was started
+            (`pending_workflow`). A pending receipt is emitted now; a terminal
+            receipt is emitted when the workflow resolves.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvocationPendingResponse'
+        '400':
+          description: |
+            Invalid request, or a timestamp constraint failed
+            (`capability_denied:future_timestamp`,
+            `capability_denied:past_timestamp`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            Denied (`denied`): no matching grant, scope mismatch, precondition
+            failed, or delegation rule failed. A denial receipt is still
+            emitted; its OID is in the body.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvocationDeniedResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '408':
+          description: Execution exceeded the SLA hint (`timed_out`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvocationDeniedResponse' }
+        '409':
+          description: |
+            Idempotency conflict: the same `idempotency_key` is in use with a
+            different request body (`idempotency_key_conflict`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '410':
+          description: |
+            A matching grant exists but has been revoked (`revoked`). A denial
+            receipt is emitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvocationDeniedResponse' }
+        '429':
+          description: Grant limits exceeded (`rate_limited`). A receipt is emitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvocationDeniedResponse' }
+        '500':
+          description: Actor adapter errored (`failed`). A receipt is emitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /invocations/{oid}:
+    get:
+      tags: [invocations]
+      summary: Fetch an invocation via its receipt
+      description: |
+        Returns the decision receipt for the invocation identified by OID.
+        Returns 404 if not found or if the stored object is in another tenant.
+      operationId: getInvocation
+      x-gap-conformance-tier: L1
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      responses:
+        '200':
+          description: The decision receipt for the invocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GapDecisionReceipt'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Receipts
+  # ---------------------------------------------------------------------------
+  /receipts:
+    get:
+      tags: [receipts]
+      summary: List receipts (paginated audit query)
+      description: |
+        Returns receipts in reverse-chronological order with cursor-based
+        pagination. All parameters are optional. Use for audit queries such as
+        "all actions taken by actor X under grant Y in the last 24 hours."
+        Scoped to the authenticated tenant.
+      operationId: listReceipts
+      x-gap-conformance-tier: L1
+      parameters:
+        - name: actor_oid
+          in: query
+          schema: { type: string }
+        - name: grant_oid
+          in: query
+          schema: { type: string }
+        - name: capability
+          in: query
+          schema: { type: string }
+        - name: from_ms
+          in: query
+          description: Inclusive lower bound on initiated_at_ms.
+          schema: { type: integer, format: int64 }
+        - name: to_ms
+          in: query
+          description: Inclusive upper bound on initiated_at_ms.
+          schema: { type: integer, format: int64 }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ok, denied, deferred, timed_out, pending, failed]
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - name: cursor
+          in: query
+          description: Opaque pagination cursor from a prior response.
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of receipts plus the next cursor.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receipts]
+                properties:
+                  receipts:
+                    type: array
+                    items: { $ref: '#/components/schemas/GapDecisionReceipt' }
+                  next_cursor:
+                    type: [string, 'null']
+                    description: Cursor for the next page, or null at the end.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /receipts/{oid}:
+    get:
+      tags: [receipts]
+      summary: Fetch a receipt by OID
+      description: |
+        Returns the receipt CDRO. Any party holding the OID can verify
+        authenticity by recomputing sha256(canonical(envelope minus oid,
+        gap_version, signature, signature_key_id, supersedes)). Returns 404 if
+        not found or cross-tenant.
+      operationId: getReceipt
+      x-gap-conformance-tier: L1
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      responses:
+        '200':
+          description: The receipt CDRO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GapDecisionReceipt'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Workflows
+  # ---------------------------------------------------------------------------
+  /workflows/definitions:
+    post:
+      tags: [workflows]
+      summary: Define a workflow
+      description: |
+        Stores a `gap:workflow_definition` CDRO. Implemented at L3 and above.
+        The gateway MUST reject definitions whose trigger matches a
+        physical_safety or safety_class C capability and whose `on_timeout`
+        path leads to a terminal stage with `terminal_outcome='approved'`
+        (PC-11). Definitions matching physical_safety patterns MUST set
+        `requires_operator_approval=true` and carry the operator's signed
+        attestation.
+      operationId: createWorkflowDefinition
+      x-gap-conformance-tier: L3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowDefinitionCreateRequest'
+      responses:
+        '201':
+          description: Workflow definition stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinition'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /workflows/definitions/{oid}:
+    get:
+      tags: [workflows]
+      summary: Fetch a workflow definition
+      description: Returns the stored definition CDRO. 404 if not found or cross-tenant.
+      operationId: getWorkflowDefinition
+      x-gap-conformance-tier: L3
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      responses:
+        '200':
+          description: The workflow definition CDRO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinition'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workflows/start:
+    post:
+      tags: [workflows]
+      summary: Start a workflow instance
+      description: |
+        Creates a `gap:workflow_instance` from a definition and a trigger event.
+        Most instances are started automatically by the gateway when an
+        invocation matches a `capability_invocation` trigger; this endpoint
+        supports explicit starts. Implemented at L3 and above.
+      operationId: startWorkflow
+      x-gap-conformance-tier: L3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowStartRequest'
+      responses:
+        '201':
+          description: Workflow instance created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowInstance'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workflows/instances/{oid}:
+    get:
+      tags: [workflows]
+      summary: Fetch workflow instance state
+      description: |
+        Returns the instance CDRO including `current_stage_id`,
+        `terminal_outcome` (null while running), and `transition_oids`. Poll
+        this after a 202 pending_workflow invocation. Implemented at L3 and above.
+      operationId: getWorkflowInstance
+      x-gap-conformance-tier: L3
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      responses:
+        '200':
+          description: The workflow instance CDRO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowInstance'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workflows/instances/{oid}/transitions:
+    get:
+      tags: [workflows]
+      summary: List stage transitions for an instance
+      description: |
+        Returns the ordered `gap:stage_transition` CDROs for one instance, the
+        audited edges between stages. Implemented at L3 and above.
+      operationId: listWorkflowTransitions
+      x-gap-conformance-tier: L3
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      responses:
+        '200':
+          description: The ordered list of stage transitions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transitions]
+                properties:
+                  transitions:
+                    type: array
+                    items: { $ref: '#/components/schemas/StageTransition' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workflows/signal:
+    post:
+      tags: [workflows]
+      summary: Inject a channel signal into a workflow
+      description: |
+        Advances a workflow stage in response to a channel event (SMS reply,
+        voice intent, push tap). Implemented at L3 and above. SECURITY: the
+        gateway MUST verify the event's `from` matches the operator's registered
+        sender identity for the channel (E.164 for SMS; the expected identity
+        string for webhooks). Signals from unregistered senders MUST be rejected
+        and MUST NOT advance the stage; the rejection is silently dropped and the
+        stage timer continues. For physical_safety or class C stages, the sender
+        must match `StageListen.required_from_binding`.
+      operationId: signalWorkflow
+      x-gap-conformance-tier: L3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowSignalRequest'
+      responses:
+        '200':
+          description: |
+            Signal accepted (and possibly advanced the stage), or silently
+            dropped (unregistered sender or non-matching pattern). The response
+            reflects current instance state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowSignalResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Revocations
+  # ---------------------------------------------------------------------------
+  /revoke:
+    post:
+      tags: [revocations]
+      summary: L1 immediate revocation
+      description: |
+        Stores a `gap:revocation_event` that takes effect immediately. All
+        further invocations against the target are denied. Available at L1.
+      operationId: revokeL1
+      x-gap-conformance-tier: L1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeL1Request'
+      responses:
+        '201':
+          description: Revocation event stored and effective.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevocationEvent'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /revoke/provisional-block:
+    post:
+      tags: [revocations]
+      summary: Emergency 72-hour provisional block (L3)
+      description: |
+        Takes effect immediately and is valid for 72 hours while the L3
+        multi-approver process runs in parallel. Implemented at L4. SECURITY:
+        for physical_safety or class C targets, set
+        `provisional_block_policy.on_expiry_without_quorum` to `renew` so the
+        block does not auto-lapse; an approver must explicitly lift it. A grant's
+        `revocation_level_override` does NOT prevent a provisional block.
+      operationId: revokeProvisionalBlock
+      x-gap-conformance-tier: L4
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvisionalBlockRequest'
+      responses:
+        '201':
+          description: Provisional block created and effective.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevocationEvent'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /revoke/l2/initiate:
+    post:
+      tags: [revocations]
+      summary: Start L2 multi-approver revocation
+      description: |
+        Creates a pending `gap:revocation_event` requiring a quorum of approvers
+        before `effective_at_ms` is set. Implemented at L3 and above. Add
+        approvers via POST /revoke/approve.
+      operationId: revokeL2Initiate
+      x-gap-conformance-tier: L3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeLeveledInitiateRequest'
+      responses:
+        '201':
+          description: Pending L2 revocation event created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevocationEvent'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /revoke/l3/initiate:
+    post:
+      tags: [revocations]
+      summary: Start L3 safety-critical revocation
+      description: |
+        Creates a pending L3 `gap:revocation_event`. Implemented at L4. Run
+        alongside a provisional block for immediate effect on physical-safety
+        targets.
+      operationId: revokeL3Initiate
+      x-gap-conformance-tier: L4
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeLeveledInitiateRequest'
+      responses:
+        '201':
+          description: Pending L3 revocation event created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevocationEvent'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /revoke/approve:
+    post:
+      tags: [revocations]
+      summary: Add an approver to a pending revocation
+      description: |
+        Appends an approver entry to a pending revocation event and sets
+        `effective_at_ms` if the quorum (`min_approvers`) is reached. Implemented
+        at L3 and above. SECURITY: the gateway MUST reject duplicate approvals
+        from the same `actor_oid` and self-approval (approver OID equals the
+        revocation event's `created_by`).
+      operationId: revokeApprove
+      x-gap-conformance-tier: L3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeApproveRequest'
+      responses:
+        '200':
+          description: Updated revocation event with the new approver appended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevocationEvent'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            Approval rejected: duplicate approver or self-approval
+            (`revocation_rejected:duplicate_approver`,
+            `revocation_rejected:self_approval`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /revocations/{oid}:
+    get:
+      tags: [revocations]
+      summary: Fetch a revocation event by OID
+      description: |
+        Returns the `gap:revocation_event` CDRO. Returns 404 if not found or if
+        the stored object's tenant_id does not match the authenticated tenant
+        (never 403; cross-tenant OID existence is not confirmed).
+      operationId: getRevocation
+      x-gap-conformance-tier: L1
+      parameters:
+        - $ref: '#/components/parameters/OidPath'
+      responses:
+        '200':
+          description: The revocation event CDRO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevocationEvent'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /revocations:
+    get:
+      tags: [revocations]
+      summary: List revocation events
+      description: |
+        Lists revocation events for a grant or declaration, scoped to the
+        authenticated tenant. Used by constrained IoT devices to maintain a
+        local revocation cache (offline revocation feed).
+      operationId: listRevocations
+      x-gap-conformance-tier: L1
+      parameters:
+        - name: grant_oid
+          in: query
+          description: Filter to events whose target_oid is this grant.
+          schema: { type: string }
+        - name: target_kind
+          in: query
+          schema:
+            $ref: '#/components/schemas/RevocationTargetKind'
+        - name: since_ms
+          in: query
+          description: Return events with created_at_ms at or after this value.
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: A list of revocation events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revocations]
+                properties:
+                  revocations:
+                    type: array
+                    items: { $ref: '#/components/schemas/RevocationEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------------------------------------------------------------------
+  # Keys
+  # ---------------------------------------------------------------------------
+  /keys/current:
+    get:
+      tags: [keys]
+      summary: Fetch the current signing public key
+      description: |
+        Returns the gateway's current receipt-signing public key (Ed25519) as
+        both base64url and JWK. Cache by `key_id` for offline verification.
+        Available at L1.
+      operationId: getCurrentKey
+      x-gap-conformance-tier: L1
+      responses:
+        '200':
+          description: The current signing key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SigningKey'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /keys/{key_id}:
+    get:
+      tags: [keys]
+      summary: Fetch a historical signing key
+      description: |
+        Returns a specific signing key by ID. Old keys remain valid for
+        verifying receipts signed under them. Available at L1.
+      operationId: getKeyById
+      x-gap-conformance-tier: L1
+      parameters:
+        - name: key_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The requested signing key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SigningKey'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Channels
+  # ---------------------------------------------------------------------------
+  /channels:
+    get:
+      tags: [channels]
+      summary: List channel adapters and health
+      description: |
+        Returns the registered channel adapters, the GAP listen/action shapes
+        each supports, and a health snapshot. Implemented at L3 and above (L3
+        requires at least one channel adapter).
+      operationId: listChannels
+      x-gap-conformance-tier: L3
+      responses:
+        '200':
+          description: Registered channel adapters and their health.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [channels]
+                properties:
+                  channels:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChannelStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Tenant-scoped token: `Authorization: Bearer synoi-sk-<48 hex chars>`.
+        The token identifies a tenant; every object is scoped to it.
+
+  parameters:
+    OidPath:
+      name: oid
+      in: path
+      required: true
+      description: Content-addressed identifier, `sha256:<64 hex chars>`.
+      schema:
+        $ref: '#/components/schemas/Oid'
+    GapGrantHeader:
+      name: X-GAP-Grant
+      in: header
+      required: false
+      description: |
+        Optional grant OID header (`sha256:<hex>`). Alternative to the
+        `caller.grant_oid` body field. The `Authorization: GAPGrant sha256:<hex>`
+        variant is also accepted.
+      schema:
+        $ref: '#/components/schemas/Oid'
+
+  responses:
+    BadRequest:
+      description: Invalid request (validation, malformed body, bad timestamp).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing or invalid Bearer token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: |
+        Authenticated but not permitted (e.g. non-operator issuing a grant, or
+        granted_by mismatch).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: |
+        Object not found, or it belongs to another tenant (cross-tenant
+        existence is never confirmed).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: |
+        State conflict (e.g. OID already exists with different content, or
+        idempotency key reused with a different body).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Request rate or grant limits exceeded.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+
+    # -- Primitives -----------------------------------------------------------
+    Oid:
+      type: string
+      description: Content-addressed identifier.
+      pattern: '^sha256:[0-9a-f]{64}$'
+      examples: ['sha256:a3f2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2']
+
+    GapVersion:
+      type: string
+      const: '1.0'
+      description: GAP wire version. Always "1.0" for this spec version.
+
+    GapObjectType:
+      type: string
+      description: >
+        Known GAP CDRO object types. gap:federation_handshake is reserved for
+        GAP 1.1 - not required for any conformance tier in GAP 1.0.
+      enum:
+        - gap:capability_declaration
+        - gap:capability_grant
+        - gap:capability_invocation
+        - gap:workflow_definition
+        - gap:workflow_instance
+        - gap:stage_transition
+        - gap:channel_event
+        - gap:decision_receipt
+        - gap:revocation_event
+        - gap:federation_handshake  # reserved for GAP 1.1
+
+    GapActorType:
+      type: string
+      enum: [skill, service, device, agent, mcp_server, gateway_subsystem, human_user]
+
+    SafetyClass:
+      type: string
+      description: |
+        A = read-only or reversible, no physical risk. B = state-changing but
+        recoverable. C = physical-safety-critical or irreversible.
+      enum: [A, B, C]
+
+    CapabilityPredicate:
+      type: object
+      required: [kind, args]
+      properties:
+        kind: { type: string }
+        args:
+          type: object
+          additionalProperties: true
+
+    # -- CDRO envelope --------------------------------------------------------
+    GapCdroEnvelope:
+      type: object
+      description: |
+        The outer wrapper for every GAP object. `oid`, `gap_version`,
+        `signature`, `signature_key_id`, and `supersedes` are excluded from the
+        OID hash input.
+      required: [oid, type, gap_version, tenant_id, created_at_ms, created_by, body]
+      properties:
+        oid: { $ref: '#/components/schemas/Oid' }
+        type: { $ref: '#/components/schemas/GapObjectType' }
+        gap_version: { $ref: '#/components/schemas/GapVersion' }
+        tenant_id: { type: string }
+        created_at_ms: { type: integer, format: int64 }
+        created_by:
+          type: string
+          description: OID of the actor that created this CDRO.
+        body:
+          type: object
+          additionalProperties: true
+        signature:
+          type: string
+          description: Ed25519 signature over the canonical envelope, base64url.
+        signature_key_id: { type: string }
+        supersedes:
+          type: [string, 'null']
+          description: OID of a prior CDRO this one replaces.
+
+    # -- Declaration ----------------------------------------------------------
+    Capability:
+      type: object
+      required: [capability]
+      properties:
+        capability:
+          type: string
+          description: Dotted-taxonomy capability name, e.g. home.lighting.control.
+        scope:
+          type: object
+          additionalProperties: true
+        preconditions:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityPredicate' }
+        safety_class: { $ref: '#/components/schemas/SafetyClass' }
+        physical_safety:
+          type: boolean
+          description: True if invocation can change physical-world state.
+        require_signed_receipt:
+          type: boolean
+          description: |
+            If true, the gateway MUST return a cryptographically signed receipt.
+            Routes to L2+ signing path. When false, the gateway SHOULD omit the
+            signature even on an L4 server (useful for high-frequency trivial
+            actions). When absent, the gateway applies its configured default
+            signing policy. The operator may override this on the grant via
+            GrantedCapabilityScope.require_signed_receipt.
+        pii_args:
+          type: array
+          items: { type: string }
+          description: |
+            Argument keys that contain PII, PHI, or NPI requiring tokenization
+            before storage. The gateway MUST NOT log or store these values in any
+            CDRO; they are replaced with a keyed HMAC token before constructing
+            the invocation CDRO and receipt body. Required for capabilities with
+            privacy_classification 'phi' or whose name matches medical.* or
+            financial.*.
+        privilege_protected:
+          type: boolean
+          description: |
+            If true, invocation requires elevated authorization. The gateway
+            routes receipts for this capability to a privilege-isolated store,
+            suppresses them from the standard GET /receipts list endpoint,
+            requires an explicit attorney-assertion header on fetch by OID, and
+            excludes the receipt from automated compliance exports.
+
+    CapabilityDeclarationBody:
+      type: object
+      required: [actor_type, actor_id, actor_name, actor_version, capabilities]
+      properties:
+        actor_type: { $ref: '#/components/schemas/GapActorType' }
+        actor_id: { type: string }
+        actor_name: { type: string }
+        actor_version: { type: string }
+        source_url: { type: string }
+        parent_oid: { type: string }
+        capabilities:
+          type: array
+          items: { $ref: '#/components/schemas/Capability' }
+        declared_limits:
+          type: object
+          properties:
+            max_invocations_per_minute: { type: integer }
+            max_concurrent_invocations: { type: integer }
+            max_payload_bytes: { type: integer }
+            requires_network: { type: boolean }
+            requires_filesystem_read:
+              type: array
+              items: { type: string }
+            requires_filesystem_write:
+              type: array
+              items: { type: string }
+        actor_lifecycle:
+          type: string
+          enum: [persistent, ephemeral]
+          description: |
+            persistent (default): standard supersession uniqueness rules apply.
+            ephemeral: declaration is exempt from supersession uniqueness; each
+            invocation gets a fresh OID valid for its session only.
+        actor_instance_id:
+          type: string
+          description: |
+            UUID or job ID distinguishing this instance from others with the same
+            actor_id. Two declarations with the same actor_id but different
+            actor_instance_id MUST NOT be treated as superseding each other.
+        session_expires_at_ms:
+          type: integer
+          format: int64
+          description: |
+            For ephemeral actors: when this session ends (Unix epoch ms). The
+            gateway MUST auto-revoke all grants scoped to this actor_instance_id
+            at this time.
+        identity_binding:
+          type: object
+          description: |
+            Real-world credential binding for this actor. Ties the actor_oid to a
+            verifiable credential using a hardware-backed signature.
+          required: [credential_kind, credential_identifier, binding_signature, binding_alg, bound_at_ms]
+          properties:
+            credential_kind:
+              type: string
+              enum: [piv_cac, x509, fido2, tpm_attestation, oidc_sub, spiffe_svid, wallet_address, professional_license]
+            credential_identifier: { type: string }
+            binding_signature: { type: string }
+            binding_alg: { type: string }
+            bound_at_ms: { type: integer, format: int64 }
+            issuer: { type: string }
+            expires_at_ms: { type: integer, format: int64 }
+        compartment:
+          type: string
+          description: |
+            Compartment label for this declaration. Values: 'UNCLASS', 'CUI', or
+            a reverse-domain operator label (e.g. 'com.acme.project-alpha').
+        human_summary: { type: string }
+        privacy_classification:
+          type: string
+          enum: [public, restricted, sensitive, phi, pii, financial, privileged]
+
+    CapabilityDeclaration:
+      allOf:
+        - $ref: '#/components/schemas/GapCdroEnvelope'
+        - type: object
+          properties:
+            type: { const: gap:capability_declaration }
+            body: { $ref: '#/components/schemas/CapabilityDeclarationBody' }
+
+    DeclarationCreateRequest:
+      type: object
+      required: [created_by, body]
+      properties:
+        created_by:
+          type: string
+          description: Self-computed actor OID (see the bootstrap procedure).
+        supersedes:
+          type: string
+          description: OID of the prior declaration being replaced.
+        body: { $ref: '#/components/schemas/CapabilityDeclarationBody' }
+
+    # -- Grant ----------------------------------------------------------------
+    GrantedCapabilityScope:
+      type: object
+      required: [capability]
+      properties:
+        capability: { type: string }
+        capability_declaration_oid:
+          type: string
+          description: |
+            REQUIRED for safety_class C or physical_safety capabilities. Pins
+            the grant to a specific declaration OID, preventing supersession
+            attacks.
+        scope_narrowing:
+          type: object
+          additionalProperties: true
+          description: |
+            Per-key constraints evaluated against invocation args. NOTE: NOT
+            enforced at L1 (it is grant-evaluation step 4).
+        additional_preconditions:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityPredicate' }
+        require_signed_receipt:
+          type: boolean
+          description: |
+            Operator override for receipt signing on this specific scope. When
+            set, takes precedence over the capability declaration's
+            require_signed_receipt. Allows a compliance deployment to require
+            signed receipts for every action regardless of what the actor
+            declared, or to suppress signing for a high-frequency capability.
+
+    AggregateLimit:
+      type: object
+      required: [key, max, window_seconds]
+      properties:
+        key:
+          type: string
+          description: Invocation args key to sum (must be numeric).
+        max: { type: number }
+        window_seconds: { type: number }
+
+    CapabilityGrantBody:
+      type: object
+      required: [grantee, capability_scopes, granted_at_ms, expires_at_ms, granted_by]
+      properties:
+        grantee:
+          type: object
+          required: [actor_type, actor_oid]
+          properties:
+            actor_type: { $ref: '#/components/schemas/GapActorType' }
+            actor_oid: { type: string }
+            actor_session_id: { type: string }
+        capability_scopes:
+          type: array
+          items: { $ref: '#/components/schemas/GrantedCapabilityScope' }
+        granted_at_ms: { type: integer, format: int64 }
+        expires_at_ms:
+          type: [integer, 'null']
+          format: int64
+          description: Null means valid until explicitly revoked.
+        limits:
+          type: object
+          properties:
+            max_invocations_per_minute: { type: integer }
+            max_invocations_total: { type: integer }
+            max_payload_bytes: { type: integer }
+            aggregate_limits:
+              type: array
+              items: { $ref: '#/components/schemas/AggregateLimit' }
+            aggregate_limit_group:
+              type: string
+              description: |
+                Named pool identifier for cross-grant aggregate limit groups. All
+                grants with the same aggregate_limit_group share rolling aggregate
+                counters. The gateway MUST maintain atomic counters per pool and
+                MUST deny any invocation that would exceed the pool ceiling.
+        granted_by:
+          type: string
+          description: Operator OID. MUST match the Bearer token's operator OID.
+        reason: { type: string }
+        evidence_oids:
+          type: array
+          items: { type: string }
+        revocation_level_override:
+          type: integer
+          enum: [1, 2, 3]
+        parent_grant_oid:
+          type: string
+          description: Parent grant OID for delegated grants.
+        max_delegation_depth:
+          type: integer
+          description: |
+            Additional delegation hops permitted below this grant. Treated as 0
+            when absent on a physical_safety grant. Hard cap of 10 regardless.
+        require_signed_receipt:
+          type: boolean
+          description: |
+            Operator override for receipt signing at grant body level. When set,
+            takes precedence over the capability declaration's
+            require_signed_receipt. Applies across all capability_scopes in this
+            grant when no per-scope override is set.
+        timestamp_window_seconds:
+          type: integer
+          description: |
+            For safety_class C without physical_safety: override for the default
+            timestamp validation window in seconds. Gateway applies its default
+            if absent.
+        offline_grace_seconds:
+          type: integer
+          description: |
+            Additional seconds beyond grant expiry during which offline
+            provisional receipts are accepted at reconciliation. Defaults to 0.
+        max_grant_offline_ttl_ms:
+          type: integer
+          format: int64
+          description: |
+            Maximum duration any device may use this grant without syncing to the
+            gateway. After this window, further invocations MUST be denied until
+            the device reconnects.
+        max_revocation_bundle_age_ms:
+          type: integer
+          format: int64
+          description: |
+            Maximum acceptable age of a revocation bundle for this grant. Devices
+            MUST deny physical_safety/class C invocations if the bundle is older
+            than this value.
+        break_glass:
+          type: boolean
+          description: |
+            When true, marks this grant as a break-glass grant. A break-glass
+            grant pre-authorizes a defined set of emergency capabilities with an
+            offline-verifiable signed token, for use when the gateway is
+            unreachable and immediate action is required for safety or clinical
+            reasons.
+        break_glass_ttl_ms:
+          type: integer
+          format: int64
+          description: |
+            TTL of the break-glass token in milliseconds from issuance.
+            RECOMMENDED: 4 hours (14_400_000 ms). Required when break_glass is
+            true.
+        break_glass_max_invocations:
+          type: integer
+          description: |
+            Maximum invocations allowed under this token before it is exhausted.
+            Defaults to 1 for safety_class C.
+        break_glass_requires_reason:
+          type: boolean
+          description: |
+            When true, the invoker MUST supply a break_glass_reason string in
+            invocation args when activating break-glass operation.
+        compartment:
+          type: string
+          description: |
+            Compartment label for this grant. At invocation time, if the grant
+            carries a compartment the invocation compartment MUST exactly match.
+            Cross-compartment access requires a bridge grant issued through a
+            TPI-gated HITL workflow.
+
+    CapabilityGrant:
+      allOf:
+        - $ref: '#/components/schemas/GapCdroEnvelope'
+        - type: object
+          properties:
+            type: { const: gap:capability_grant }
+            body: { $ref: '#/components/schemas/CapabilityGrantBody' }
+
+    GrantCreateRequest:
+      type: object
+      required: [created_by, body]
+      properties:
+        created_by:
+          type: string
+          description: Operator OID.
+        supersedes: { type: string }
+        body: { $ref: '#/components/schemas/CapabilityGrantBody' }
+
+    GrantUpdateRequest:
+      type: object
+      description: Operator-signed predicate update to an existing grant.
+      required: [created_by, body]
+      properties:
+        created_by:
+          type: string
+          description: Operator OID (must match the issuing operator).
+        body:
+          type: object
+          properties:
+            scope_narrowing:
+              type: object
+              additionalProperties: true
+            additional_preconditions:
+              type: array
+              items: { $ref: '#/components/schemas/CapabilityPredicate' }
+            limits:
+              type: object
+              additionalProperties: true
+            expires_at_ms:
+              type: [integer, 'null']
+              format: int64
+
+    # -- Invocation -----------------------------------------------------------
+    CapabilityInvocationBody:
+      type: object
+      required: [caller, capability, args]
+      properties:
+        caller:
+          type: object
+          required: [actor_type, actor_oid, grant_oid]
+          properties:
+            actor_type: { $ref: '#/components/schemas/GapActorType' }
+            actor_oid: { type: string }
+            actor_session_id: { type: string }
+            grant_oid: { type: string }
+        capability: { type: string }
+        capability_declaration_oid:
+          type: string
+          description: Optional routing hint; resolved from the grant if omitted.
+        args:
+          type: object
+          additionalProperties: true
+        workflow_context:
+          type: object
+          required: [workflow_instance_oid, stage_id]
+          properties:
+            workflow_instance_oid: { type: string }
+            stage_id: { type: string }
+        sla_hint:
+          type: object
+          properties:
+            max_latency_ms: { type: integer }
+            deferrable: { type: boolean }
+        idempotency_key:
+          type: string
+          description: Per-tenant, 24h window. Replays the original receipt.
+        invoked_at_ms:
+          type: integer
+          format: int64
+          description: |
+            Server-stamped. Clients SHOULD omit. For physical_safety or class C
+            capabilities a client value is preserved only as client_claimed_at_ms.
+            Otherwise the gateway rejects values more than 5 minutes in the
+            future or more than 60 seconds in the past.
+        client_event_ms:
+          type: integer
+          format: int64
+          description: |
+            Unix epoch ms when the action originally occurred in the caller's
+            reference frame (game-world time, clinical queue time, SCADA scan
+            cycle). Populated by the client; not used for replay prevention.
+            Stored in receipt for audit.
+        queued_at_ms:
+          type: integer
+          format: int64
+          description: |
+            Unix epoch ms when the invocation was enqueued for submission (e.g.
+            at reconnect after an offline period). Optional; aids debugging of
+            delivery latency.
+        delegation_chain:
+          type: array
+          description: |
+            Delegation chain steps when this invocation was reached through a
+            multi-hop orchestration chain. Max 10 steps; gateway returns HTTP 400
+            'capability_denied:delegation_depth_exceeded' when length exceeds 10.
+          items:
+            type: object
+            required: [step_index, delegator_actor_oid, delegatee_actor_oid, grant_oid, delegated_at_ms, step_signature, step_signature_alg]
+            properties:
+              step_index: { type: integer }
+              delegator_actor_oid: { type: string }
+              delegatee_actor_oid: { type: string }
+              grant_oid: { type: string }
+              prior_receipt_oid: { type: string }
+              delegated_at_ms: { type: integer, format: int64 }
+              step_signature: { type: string }
+              step_signature_alg: { type: string }
+        mcp_tool_call:
+          type: object
+          description: |
+            Raw MCP tool-call context when the capability was auto-generated from
+            an MCP tools/list response. The gateway validates server_id is
+            non-empty and tool_name does not start with 'gap:'.
+          required: [server_id, tool_name]
+          properties:
+            server_id: { type: string }
+            tool_name: { type: string }
+            tool_schema_hash: { type: string }
+        compartment:
+          type: string
+          description: |
+            Compartment label on this invocation. MUST exactly match the grant's
+            compartment when the grant carries one. The gateway MUST return HTTP
+            404 (not HTTP 403) when the invoking actor's compartment level is
+            insufficient to know a resource exists.
+
+    InvocationRequest:
+      type: object
+      required: [caller, capability, args]
+      description: |
+        The invocation body. The gateway constructs the
+        gap:capability_invocation CDRO; clients submit the body fields.
+      allOf:
+        - $ref: '#/components/schemas/CapabilityInvocationBody'
+
+    InvocationOkResponse:
+      type: object
+      required: [status, receipt_oid, receipt]
+      properties:
+        status: { const: ok }
+        receipt_oid: { $ref: '#/components/schemas/Oid' }
+        receipt: { $ref: '#/components/schemas/GapDecisionReceipt' }
+
+    InvocationPendingResponse:
+      type: object
+      required: [status, workflow_instance_oid, receipt_oid]
+      properties:
+        status: { const: pending_workflow }
+        workflow_instance_oid: { $ref: '#/components/schemas/Oid' }
+        receipt_oid:
+          $ref: '#/components/schemas/Oid'
+        receipt:
+          $ref: '#/components/schemas/GapDecisionReceipt'
+
+    InvocationDeniedResponse:
+      type: object
+      required: [reason, receipt_oid]
+      properties:
+        reason:
+          type: string
+          description: |
+            Namespaced error code from the GAP Error Code Registry (see
+            ERROR_CODES.md). Format: <category>:<specific_code>, e.g.
+            capability_denied:no_grant.
+          examples: ['capability_denied:no_grant', 'capability_denied:grant_expired', 'capability_denied:rate_limited']
+        detail:
+          type: string
+          description: Human-readable detail; names the failing key where relevant.
+        receipt_oid:
+          $ref: '#/components/schemas/Oid'
+
+    # -- Receipt --------------------------------------------------------------
+    DecisionSubjectKind:
+      type: string
+      description: >
+        Subject kind for a decision receipt. federation_handshake is reserved
+        for GAP 1.1 - not required for any conformance tier in GAP 1.0.
+      enum:
+        - capability_invocation
+        - stage_transition
+        - grant_issued
+        - grant_revoked
+        - workflow_started
+        - workflow_terminated
+        - revocation_initiated
+        - revocation_effective
+        - federation_handshake  # reserved for GAP 1.1
+        - provisional_block
+
+    DecisionStatus:
+      type: string
+      enum: [ok, denied, failed, deferred, timed_out, pending, rate_limited]
+
+    GapDecisionReceiptBody:
+      type: object
+      required: [subject_kind, subject_oid, initiator, status, initiated_at_ms, resolved_at_ms]
+      properties:
+        subject_kind: { $ref: '#/components/schemas/DecisionSubjectKind' }
+        subject_oid: { type: string }
+        initiator:
+          type: object
+          required: [actor_oid, actor_type]
+          properties:
+            actor_oid: { type: string }
+            actor_type: { $ref: '#/components/schemas/GapActorType' }
+        status: { $ref: '#/components/schemas/DecisionStatus' }
+        detail:
+          type: string
+          description: Canonical error code or human-readable detail on non-ok.
+        capability_grant_oids:
+          type: array
+          description: Every grant evaluated, including candidates checked on denial.
+          items: { type: string }
+        workflow_instance_oid: { type: string }
+        workflow_stage_id: { type: string }
+        inference_receipt_oid: { type: string }
+        channel_event_oids:
+          type: array
+          items: { type: string }
+        initiated_at_ms:
+          type: integer
+          format: int64
+          description: Server-received timestamp. Always server-stamped.
+        resolved_at_ms: { type: integer, format: int64 }
+        metrics:
+          type: object
+          properties:
+            latency_ms: { type: integer }
+            channel_count: { type: integer }
+            listen_match_count: { type: integer }
+        compliance_tags:
+          type: array
+          description: Gateway-set tags. Callers MUST NOT set these. Not in OID hash.
+          items: { type: string }
+        is_idempotency_replay: { type: boolean }
+        client_claimed_at_ms:
+          type: integer
+          format: int64
+          description: Client-supplied invoked_at_ms, for debugging only.
+        max_offline_ttl_ms:
+          type: integer
+          format: int64
+          description: |
+            Offline-verification TTL for physical_safety receipts. Constrained
+            devices MUST NOT accept the receipt after this time.
+
+    GapDecisionReceipt:
+      allOf:
+        - $ref: '#/components/schemas/GapCdroEnvelope'
+        - type: object
+          properties:
+            type: { const: gap:decision_receipt }
+            body: { $ref: '#/components/schemas/GapDecisionReceiptBody' }
+
+    # -- Workflows ------------------------------------------------------------
+    ChannelKind:
+      type: string
+      description: |
+        Built-in channel kinds; the union is open for vendor extensions.
+      examples: [sms, voice, slack, mobile_push, home_assistant, desktop_overlay, email, in_app, game_engine, webhook]
+
+    StageAction:
+      type: object
+      required: [channel, method, params]
+      properties:
+        channel: { $ref: '#/components/schemas/ChannelKind' }
+        method: { type: string }
+        params:
+          type: object
+          additionalProperties: true
+
+    StageTransitionTarget:
+      type: object
+      properties:
+        next_stage_id: { type: string }
+        bind:
+          type: object
+          additionalProperties: { type: string }
+
+    StageListen:
+      type: object
+      required: [channel, next]
+      properties:
+        channel: { $ref: '#/components/schemas/ChannelKind' }
+        intent: { type: string }
+        pattern: { type: string }
+        event_kind: { type: string }
+        next: { $ref: '#/components/schemas/StageTransitionTarget' }
+        required_from_binding:
+          type: string
+          description: |
+            Expected sender identity. Required for physical_safety or class C
+            stages (E.164 for SMS; identity string for webhooks).
+
+    OptionalEffect:
+      type: object
+      required: [requires_capability, action]
+      properties:
+        requires_capability: { type: string }
+        action: { $ref: '#/components/schemas/StageAction' }
+        label: { type: string }
+
+    StageSafety:
+      type: object
+      required: [destructive]
+      properties:
+        destructive: { const: true }
+        resource_kind:
+          type: string
+          enum:
+            - postgres_db
+            - mysql_db
+            - aws_rds_instance
+            - aws_ebs_volume
+            - aws_s3_object_versioned
+            - k8s_namespace_velero
+            - terraform_state
+            - git_branch
+            - filesystem_path
+        snapshot_adapter: { type: string }
+        snapshot_resource_id: { type: string }
+        snapshot_config:
+          type: object
+          additionalProperties: { type: string }
+        two_person:
+          type: object
+          required: [required]
+          properties:
+            required: { type: integer }
+            require_disjoint_groups: { type: boolean }
+            eligible_groups:
+              type: array
+              items: { type: string }
+        cooldown_ms: { type: integer }
+        cooldown_eligible_groups:
+          type: array
+          items: { type: string }
+        rollback_workflow_oid: { type: string }
+
+    WorkflowStage:
+      type: object
+      required: [stage_id]
+      properties:
+        stage_id: { type: string }
+        duration_seconds: { type: integer }
+        actions:
+          type: array
+          items: { $ref: '#/components/schemas/StageAction' }
+        optional_effects:
+          type: array
+          items: { $ref: '#/components/schemas/OptionalEffect' }
+        authorized_approvers:
+          type: array
+          description: |
+            Actor OIDs permitted to supply approval signals. MUST be set for
+            physical_safety or class C stages. Disjointness enforced.
+          items: { type: string }
+        listen:
+          type: array
+          items: { $ref: '#/components/schemas/StageListen' }
+        on_timeout: { $ref: '#/components/schemas/StageTransitionTarget' }
+        on_action_failure: { $ref: '#/components/schemas/StageTransitionTarget' }
+        terminal: { type: boolean }
+        terminal_outcome:
+          type: string
+          enum: [approved, denied, timed_out, withdrawn, error]
+        invocation:
+          type: object
+          required: [capability, args]
+          properties:
+            capability: { type: string }
+            args:
+              type: object
+              additionalProperties: true
+            on_success: { $ref: '#/components/schemas/StageTransitionTarget' }
+            on_failure: { $ref: '#/components/schemas/StageTransitionTarget' }
+        precondition: { $ref: '#/components/schemas/CapabilityPredicate' }
+        safety: { $ref: '#/components/schemas/StageSafety' }
+
+    WorkflowTrigger:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [risk_policy, capability_invocation, explicit, schedule]
+        risk_class: { $ref: '#/components/schemas/SafetyClass' }
+        action_class: { type: string }
+        action_type_pattern: { type: string }
+        capability_pattern: { type: string }
+        cron: { type: string }
+
+    WorkflowDefinitionBody:
+      type: object
+      required: [workflow_id, workflow_name, workflow_version, trigger, stages, initial_stage_id, required_channels, max_total_duration_seconds]
+      properties:
+        workflow_id: { type: string }
+        workflow_name: { type: string }
+        workflow_version: { type: string }
+        description: { type: string }
+        trigger: { $ref: '#/components/schemas/WorkflowTrigger' }
+        stages:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowStage' }
+        initial_stage_id: { type: string }
+        cleanup_stage_id: { type: string }
+        required_channels:
+          type: array
+          items: { $ref: '#/components/schemas/ChannelKind' }
+        optional_channels:
+          type: array
+          items: { $ref: '#/components/schemas/ChannelKind' }
+        max_total_duration_seconds: { type: integer }
+        requires_operator_approval:
+          type: boolean
+          description: |
+            MUST be true for physical_safety capability_pattern definitions.
+
+    WorkflowDefinition:
+      allOf:
+        - $ref: '#/components/schemas/GapCdroEnvelope'
+        - type: object
+          properties:
+            type: { const: gap:workflow_definition }
+            body: { $ref: '#/components/schemas/WorkflowDefinitionBody' }
+
+    WorkflowDefinitionCreateRequest:
+      type: object
+      required: [created_by, body]
+      properties:
+        created_by: { type: string }
+        supersedes: { type: string }
+        body: { $ref: '#/components/schemas/WorkflowDefinitionBody' }
+
+    WorkflowInstanceBody:
+      type: object
+      required: [workflow_definition_oid, workflow_id, trigger_event, current_stage_id, scope_variables, started_at_ms, last_transition_at_ms, terminated_at_ms, terminal_outcome, active_channel_listeners, transition_oids]
+      properties:
+        workflow_definition_oid: { type: string }
+        workflow_id: { type: string }
+        trigger_event:
+          type: object
+          required: [kind, source_actor_oid]
+          properties:
+            kind:
+              type: string
+              enum: [risk_policy, capability_invocation, explicit, schedule]
+            source_invocation_oid: { type: string }
+            source_risk_policy_id: { type: string }
+            source_actor_oid: { type: string }
+        current_stage_id: { type: string }
+        scope_variables:
+          type: object
+          additionalProperties: true
+        started_at_ms: { type: integer, format: int64 }
+        last_transition_at_ms: { type: integer, format: int64 }
+        terminated_at_ms:
+          type: [integer, 'null']
+          format: int64
+        terminal_outcome:
+          type: [string, 'null']
+          enum: [approved, denied, timed_out, withdrawn, error, null]
+        active_channel_listeners:
+          type: array
+          items:
+            type: object
+            required: [channel, listen_spec, started_at_ms]
+            properties:
+              channel: { $ref: '#/components/schemas/ChannelKind' }
+              listen_spec: { $ref: '#/components/schemas/StageListen' }
+              started_at_ms: { type: integer, format: int64 }
+        transition_oids:
+          type: array
+          items: { type: string }
+        final_receipt_oid: { type: string }
+
+    WorkflowInstance:
+      allOf:
+        - $ref: '#/components/schemas/GapCdroEnvelope'
+        - type: object
+          properties:
+            type: { const: gap:workflow_instance }
+            body: { $ref: '#/components/schemas/WorkflowInstanceBody' }
+
+    WorkflowStartRequest:
+      type: object
+      required: [workflow_definition_oid, trigger_event]
+      properties:
+        workflow_definition_oid: { type: string }
+        trigger_event:
+          type: object
+          required: [kind, source_actor_oid]
+          properties:
+            kind:
+              type: string
+              enum: [risk_policy, capability_invocation, explicit, schedule]
+            source_invocation_oid: { type: string }
+            source_actor_oid: { type: string }
+
+    StageTransitionReason:
+      type: string
+      enum:
+        - listen_matched
+        - timeout
+        - action_completed
+        - action_failed
+        - precondition_passed
+        - precondition_failed
+        - invocation_succeeded
+        - invocation_failed
+        - external_signal
+        - cleanup
+
+    StageTransitionBody:
+      type: object
+      required: [workflow_instance_oid, previous_transition_oid, from_stage_id, to_stage_id, trigger_reason, bind_outputs, transitioned_at_ms]
+      properties:
+        workflow_instance_oid: { type: string }
+        previous_transition_oid:
+          type: [string, 'null']
+        from_stage_id: { type: string }
+        to_stage_id: { type: string }
+        trigger_reason: { $ref: '#/components/schemas/StageTransitionReason' }
+        bind_outputs:
+          type: object
+          additionalProperties: true
+        triggering_event_oid: { type: string }
+        triggering_invocation_oid: { type: string }
+        transitioned_at_ms: { type: integer, format: int64 }
+
+    StageTransition:
+      allOf:
+        - $ref: '#/components/schemas/GapCdroEnvelope'
+        - type: object
+          properties:
+            type: { const: gap:stage_transition }
+            body: { $ref: '#/components/schemas/StageTransitionBody' }
+
+    WorkflowSignalRequest:
+      type: object
+      required: [workflow_instance_oid, channel, event]
+      properties:
+        workflow_instance_oid: { type: string }
+        channel: { $ref: '#/components/schemas/ChannelKind' }
+        event:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string }
+            body: { type: string }
+            from:
+              type: string
+              description: Sender identity. Verified against the registered sender.
+
+    WorkflowSignalResponse:
+      type: object
+      description: Current instance state after the signal was processed or dropped.
+      required: [accepted]
+      properties:
+        accepted:
+          type: boolean
+          description: |
+            True if the signal was accepted. False if silently dropped
+            (unregistered sender or no matching pattern). Either way the stage
+            timer continues.
+        instance: { $ref: '#/components/schemas/WorkflowInstance' }
+
+    # -- Revocations ----------------------------------------------------------
+    RevocationTargetKind:
+      type: string
+      enum:
+        - capability_declaration
+        - capability_grant
+        - workflow_definition
+        - workflow_instance
+        - skill
+
+    ProvisionalBlockPolicy:
+      type: object
+      required: [on_expiry_without_quorum]
+      properties:
+        on_expiry_without_quorum:
+          type: string
+          enum: [renew, revert]
+          description: |
+            renew = block auto-renews (fail-closed; the default and MUST be the
+            behavior for physical_safety or class C targets). revert = block
+            lapses (only for class A/B with explicit override).
+
+    RevocationApprover:
+      type: object
+      required: [actor_oid, approved_at_ms, cooling_off_satisfied]
+      properties:
+        actor_oid: { type: string }
+        approved_at_ms: { type: integer, format: int64 }
+        cooling_off_satisfied: { type: boolean }
+        attestation_oid: { type: string }
+
+    RevocationEventBody:
+      type: object
+      required: [target_kind, target_oid, reason, required_level, provisional, approvers, effective_at_ms]
+      properties:
+        target_kind: { $ref: '#/components/schemas/RevocationTargetKind' }
+        target_oid: { type: string }
+        reason: { type: string }
+        evidence_oids:
+          type: array
+          items: { type: string }
+        required_level:
+          type: integer
+          enum: [1, 2, 3]
+        provisional: { type: boolean }
+        approvers:
+          type: array
+          items: { $ref: '#/components/schemas/RevocationApprover' }
+        public_notice_started_at_ms: { type: integer, format: int64 }
+        public_notice_window_ms: { type: integer, format: int64 }
+        effective_at_ms:
+          type: [integer, 'null']
+          format: int64
+          description: Null until quorum / immediate L1 sets it.
+        lifted_at_ms:
+          type: [integer, 'null']
+          format: int64
+        provisional_block_policy:
+          $ref: '#/components/schemas/ProvisionalBlockPolicy'
+        min_approvers:
+          type: integer
+          description: |
+            Minimum distinct approvers to set effective_at_ms. Default 1 for L2;
+            gateway-configured for L3 (recommended >= 2).
+
+    RevocationEvent:
+      allOf:
+        - $ref: '#/components/schemas/GapCdroEnvelope'
+        - type: object
+          properties:
+            type: { const: gap:revocation_event }
+            body: { $ref: '#/components/schemas/RevocationEventBody' }
+
+    RevokeL1Request:
+      type: object
+      required: [created_by, body]
+      properties:
+        created_by:
+          type: string
+          description: Operator OID.
+        body:
+          type: object
+          required: [target_oid, target_type, revocation_level, reason]
+          properties:
+            target_oid: { type: string }
+            target_type:
+              type: string
+              description: e.g. gap:capability_grant.
+            revocation_level:
+              type: integer
+              const: 1
+            reason: { type: string }
+
+    RevokeLeveledInitiateRequest:
+      type: object
+      required: [created_by, body]
+      properties:
+        created_by: { type: string }
+        body:
+          type: object
+          required: [target_oid, target_kind, reason, required_level]
+          properties:
+            target_oid: { type: string }
+            target_kind: { $ref: '#/components/schemas/RevocationTargetKind' }
+            reason: { type: string }
+            required_level:
+              type: integer
+              enum: [2, 3]
+            min_approvers: { type: integer }
+            evidence_oids:
+              type: array
+              items: { type: string }
+
+    ProvisionalBlockRequest:
+      type: object
+      required: [created_by, body]
+      properties:
+        created_by:
+          type: string
+          description: Operator OID.
+        body:
+          type: object
+          required: [target_oid, target_kind, reason, provisional, required_level, approvers]
+          properties:
+            target_oid: { type: string }
+            target_kind: { $ref: '#/components/schemas/RevocationTargetKind' }
+            reason: { type: string }
+            provisional:
+              type: boolean
+              const: true
+            required_level:
+              type: integer
+              const: 3
+            approvers:
+              type: array
+              description: Empty on initiation; populated via /revoke/approve.
+              items: { $ref: '#/components/schemas/RevocationApprover' }
+            effective_at_ms:
+              type: [integer, 'null']
+              format: int64
+            provisional_block_policy:
+              $ref: '#/components/schemas/ProvisionalBlockPolicy'
+
+    RevokeApproveRequest:
+      type: object
+      required: [revocation_event_oid, approver_actor_oid]
+      properties:
+        revocation_event_oid: { type: string }
+        approver_actor_oid: { type: string }
+        attestation_oid:
+          type: string
+          description: Optional attestation CDRO OID.
+
+    # -- Keys -----------------------------------------------------------------
+    SigningKey:
+      type: object
+      required: [key_id, algorithm, public_key_base64, valid_from_ms]
+      properties:
+        key_id: { type: string }
+        algorithm:
+          type: string
+          examples: [Ed25519]
+        public_key_base64: { type: string }
+        public_key_jwk:
+          type: object
+          properties:
+            kty: { type: string, examples: [OKP] }
+            crv: { type: string, examples: [Ed25519] }
+            x: { type: string }
+        valid_from_ms: { type: integer, format: int64 }
+        expires_at_ms:
+          type: [integer, 'null']
+          format: int64
+
+    # -- Channels -------------------------------------------------------------
+    ChannelStatus:
+      type: object
+      required: [kind, supports, health]
+      properties:
+        kind: { $ref: '#/components/schemas/ChannelKind' }
+        supports:
+          type: object
+          properties:
+            actions:
+              type: array
+              items: { type: string }
+            listens:
+              type: array
+              items:
+                type: string
+                enum: [intent, pattern, event_kind]
+        health:
+          type: object
+          required: [ok]
+          properties:
+            ok: { type: boolean }
+            detail: { type: string }
+
+    # -- Error ----------------------------------------------------------------
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message, type]
+          properties:
+            message: { type: string }
+            type:
+              type: string
+              enum: [capability_denied, not_found, invalid_request, auth_error, internal_error]

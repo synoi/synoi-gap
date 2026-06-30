@@ -1,0 +1,55 @@
+{
+  "name": "@synoi/gap",
+  "version": "0.1.0",
+  "description": "TypeScript types and utilities for the GAP (Governed Action Protocol)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx test/types.test.ts && tsx test/validate.test.ts && tsx test/oid.test.ts && tsx test/round-trip.test.ts && tsx test/conformance.test.ts"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "synoi",
+    "gap",
+    "governed-action-protocol",
+    "ai-governance",
+    "capability",
+    "hitl",
+    "types"
+  ],
+  "homepage": "https://github.com/synoi/synoi-gap#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/synoi/synoi-gap"
+  },
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "sideEffects": false
+}

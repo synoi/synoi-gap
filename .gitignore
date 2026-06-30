@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Demo secrets + local state -- never commit
+.env.demo
+demo/.demo-state.json
+
+# Python build artifacts
+__pycache__/
+*.pyc
+.claude/

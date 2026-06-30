@@ -1,0 +1,81 @@
+{
+  "version": "1.0",
+  "description": "Cross-language OID parity vectors for GAP 1.0. Implementations in any language must produce these exact sha256 hex values for these inputs.",
+  "note": "All string values containing non-ASCII characters must be emitted as UTF-8 byte sequences, not Unicode escape sequences (ensure_ascii=False in Python, JSON.stringify native in JavaScript).",
+  "vectors": [
+    {
+      "id": "V_DECL",
+      "description": "gap:capability_declaration - basic actor declaration",
+      "input": {
+        "type": "gap:capability_declaration",
+        "tenant_id": "tenant-vector-1",
+        "created_at_ms": 1700000000000,
+        "created_by": "actor:operator",
+        "body": {
+          "actor_type": "skill",
+          "actor_id": "skill:demo",
+          "actor_name": "Demo",
+          "actor_version": "1.0.0",
+          "capabilities": [{ "capability": "demo.say_hello" }]
+        }
+      },
+      "excluded_fields": ["oid", "gap_version", "signature", "signature_key_id", "supersedes"],
+      "canonical": "{\"body\":{\"actor_id\":\"skill:demo\",\"actor_name\":\"Demo\",\"actor_type\":\"skill\",\"actor_version\":\"1.0.0\",\"capabilities\":[{\"capability\":\"demo.say_hello\"}]},\"created_at_ms\":1700000000000,\"created_by\":\"actor:operator\",\"tenant_id\":\"tenant-vector-1\",\"type\":\"gap:capability_declaration\"}",
+      "oid": "sha256:8ba63136f70092f3bb4b35d8194c43255077f6332dad40e4bcdab4a1220b0612"
+    },
+    {
+      "id": "V_GRANT",
+      "description": "gap:capability_grant - grant with null expiry (null MUST be kept per RFC 8785 JCS)",
+      "input": {
+        "type": "gap:capability_grant",
+        "tenant_id": "tenant-vector-2",
+        "created_at_ms": 1700000001000,
+        "created_by": "actor:operator",
+        "body": {
+          "grantee": { "actor_type": "skill", "actor_oid": "actor:abc" },
+          "capability_scopes": [{ "capability": "demo.*" }],
+          "granted_at_ms": 1700000001000,
+          "expires_at_ms": null,
+          "granted_by": "actor:operator"
+        }
+      },
+      "excluded_fields": ["oid", "gap_version", "signature", "signature_key_id", "supersedes"],
+      "canonical": "{\"body\":{\"capability_scopes\":[{\"capability\":\"demo.*\"}],\"expires_at_ms\":null,\"granted_at_ms\":1700000001000,\"granted_by\":\"actor:operator\",\"grantee\":{\"actor_oid\":\"actor:abc\",\"actor_type\":\"skill\"}},\"created_at_ms\":1700000001000,\"created_by\":\"actor:operator\",\"tenant_id\":\"tenant-vector-2\",\"type\":\"gap:capability_grant\"}",
+      "oid": "sha256:b6c8902926d49cf6a88c1393e6f038825f3fed0a79b13d60335c6729883dbc75"
+    },
+    {
+      "id": "V_INV",
+      "description": "gap:capability_invocation",
+      "input": {
+        "type": "gap:capability_invocation",
+        "tenant_id": "tenant-vector-3",
+        "created_at_ms": 1700000002000,
+        "created_by": "actor:abc",
+        "body": {
+          "caller": { "actor_type": "skill", "actor_oid": "actor:abc", "grant_oid": "sha256:deadbeef" },
+          "capability": "demo.say_hello",
+          "capability_declaration_oid": "sha256:cafebabe",
+          "args": { "greeting": "hello" },
+          "invoked_at_ms": 1700000002000
+        }
+      },
+      "excluded_fields": ["oid", "gap_version", "signature", "signature_key_id", "supersedes"],
+      "canonical": "{\"body\":{\"args\":{\"greeting\":\"hello\"},\"caller\":{\"actor_oid\":\"actor:abc\",\"actor_type\":\"skill\",\"grant_oid\":\"sha256:deadbeef\"},\"capability\":\"demo.say_hello\",\"capability_declaration_oid\":\"sha256:cafebabe\",\"invoked_at_ms\":1700000002000},\"created_at_ms\":1700000002000,\"created_by\":\"actor:abc\",\"tenant_id\":\"tenant-vector-3\",\"type\":\"gap:capability_invocation\"}",
+      "oid": "sha256:1674c06129e007ab2dcd28a83d68bfc99e7cfdb839b2a976ab687e9e071c065c"
+    },
+    {
+      "id": "V_NON_ASCII",
+      "description": "Non-ASCII strings must be UTF-8 literals not escape sequences",
+      "input": {
+        "type": "gap:capability_declaration",
+        "tenant_id": "t1",
+        "created_at_ms": 1,
+        "created_by": "actor:test",
+        "body": { "emoji": "🚀", "s": "é" }
+      },
+      "excluded_fields": ["oid", "gap_version", "signature", "signature_key_id", "supersedes"],
+      "canonical": "{\"body\":{\"emoji\":\"🚀\",\"s\":\"é\"},\"created_at_ms\":1,\"created_by\":\"actor:test\",\"tenant_id\":\"t1\",\"type\":\"gap:capability_declaration\"}",
+      "oid": "sha256:fa1ef08af1e93fa09513bc31ef7ae72ee7ed8f5d7ce2d071d489b857023b910c"
+    }
+  ]
+}

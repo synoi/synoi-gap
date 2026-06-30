@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synoi-gap"
+version = "0.1.0"
+description = "Python SDK for the GAP (Governed Action Protocol)"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["gap", "governed-action-protocol", "ai-governance", "synoi"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+]
+
+[project.optional-dependencies]
+http = ["httpx>=0.27.0"]
+dev = ["pytest>=8.0", "httpx>=0.27.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["synoi_gap*"]

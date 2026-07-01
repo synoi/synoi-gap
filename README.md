@@ -8,7 +8,7 @@ The protocol spec is published under CC0. This package is Apache-2.0.
 
 ## The Universal Action Coordination Fabric
 
-Today every environment that involves AI or automated action builds its own integration layer: the game engine has a custom smart-home SDK, the industrial automation system has a proprietary command channel, the AI agent framework has its own tool-calling convention. Each is siloed. None of them share an audit trail. None of them share a revocation mechanism. None of them speak to each other.
+Today every environment that involves AI or automated action builds its own integration layer: the smart home hub has a proprietary device SDK, the industrial automation system has a proprietary command channel, the AI agent framework has its own tool-calling convention, the game engine has its own NPC action system. Each is siloed. None of them share an audit trail. None of them share a revocation mechanism. None of them speak to each other.
 
 GAP is the fabric underneath all of them. Any actor (an AI agent, a smart lock, a game engine, a SCADA valve controller, an MCP tool server, a medical device) speaks the same four-phase lifecycle:
 

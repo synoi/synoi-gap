@@ -2,8 +2,6 @@
 
 **GAP (Governed Action Protocol)** is the open wire protocol for a **Universal Action Coordination Fabric**, a single governed layer that connects AI agents, smart devices, industrial systems, games, medical devices, automation pipelines, and anything else that can declare what it does.
 
-The protocol spec is published under CC0. This package is Apache-2.0.
-
 ---
 
 ## The Universal Action Coordination Fabric

@@ -1,6 +1,6 @@
 {
   "name": "@synoi/gap",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "TypeScript types and utilities for the GAP (Governed Action Protocol)",
   "type": "module",
   "main": "dist/index.js",

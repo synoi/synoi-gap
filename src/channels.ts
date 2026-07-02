@@ -10,6 +10,7 @@
  */
 
 import type { GapCdroEnvelope } from './cdro.js'
+import type { MeasuredResult } from './receipts.js'
 
 /** Built-in channel kinds. The `(string & {})` branch keeps the union open
  *  for vendor-specific extensions (e.g. 'com.example.pager') while
@@ -141,6 +142,17 @@ export interface ActionResult {
   detail?: string
   /** OID of a channel event spawned by the action, if any. */
   spawned_event_oid?: string
+  /**
+   * [0024] measured result block. Optional, backward compatible: every
+   * shipped adapter that does not set it remains valid. Populated by an
+   * adapter's `performAction` once the provider call has actually returned,
+   * so it records what happened, not what was quoted. The synchronous
+   * execute-and-await invoke path (Instagration prereq 0) reads this field
+   * and binds it into the signed `GapDecisionReceiptBody.measured` block
+   * (`receipts.ts`) so measured cost/result/counterparty enter the signed
+   * content core, not just the transient adapter response.
+   */
+  measured?: MeasuredResult
 }
 
 export interface ListenHandle {

@@ -108,6 +108,84 @@ export interface GapDecisionReceiptBody {
    * input_tokens and output_tokens MUST be non-negative integers.
    */
   token_consumption?: TokenConsumption
+  /**
+   * [0024] measured result block. The full-object signed receipt binds the
+   * MEASURED cost + quantity, the result identifier, the counterparty, and the
+   * lineage edge into the signed content. Populated by the gateway AFTER the
+   * provider action returns (Instagration synchronous invoke path), so the
+   * receipt records what actually ran, not what was quoted.
+   *
+   * Backward compatible: every field is optional and the whole block is
+   * optional, so existing receipts (workflow transitions, grant issuance,
+   * denials) that never touched a provider remain valid without it. Present
+   * only on capability_invocation receipts that dispatched to a channel
+   * adapter and got a result back.
+   *
+   * The `measured.cost_micro_usd` here is the settled provider-side cost of the
+   * action (for example a Composio/Twilio/Gmail call). It is distinct from
+   * `token_consumption.cost_usd`, which is the LLM inference cost. A single
+   * invocation may carry both (inference that then triggered a provider
+   * action) or only one.
+   */
+  measured?: MeasuredResult
+}
+
+// -- [0024] Measured result --------------------------------------------------
+
+/**
+ * [DESIGN] The measured-outcome block of the full-object signed receipt
+ * ([0024]: "measured cost + quantity, result id, counterparty, locality,
+ * lineage edge"). Written by the gateway once the provider action has
+ * returned, mirroring `ActionResult.measured` on the channel adapter
+ * (`channels.ts`, Instagration doc B.1). Bound INTO the signed content core
+ * so the receipt is non-repudiable evidence of what the action actually cost
+ * and who fulfilled it, not merely that it was allowed.
+ *
+ * All fields optional for backward compatibility. Any cost figure is
+ * [MODELED] until a conformance vector exists (CLAIMS_DISCIPLINE).
+ */
+export interface MeasuredResult {
+  /**
+   * Settled provider-side cost of the action in INTEGER micro-USD (1e-6 USD;
+   * 1 USD = 1_000_000). Integer minor units are mandatory: the GAP
+   * canonicalizer (`canonicalize.ts`) forbids float values because a float
+   * cannot be losslessly content-addressed, so a float cost would make the
+   * receipt UNSIGNABLE. Micro-USD gives sub-cent provider costs lossless
+   * representation. [MODELED] until a conformance vector exists. Distinct from
+   * `token_consumption.cost_usd` (LLM inference cost). MUST be a non-negative
+   * integer when present.
+   */
+  cost_micro_usd?: number
+  /**
+   * Wall-clock latency of the provider action in milliseconds (dispatch to
+   * result). MUST be a non-negative integer when present.
+   */
+  latency_ms?: number
+  /**
+   * The provider that actually fulfilled the action, for example 'composio',
+   * 'mcp', 'n8n', 'zapier'. For fungible capabilities (patent claims 11-13)
+   * this records which executor selection chose, so the receipt is the
+   * authoritative record of who ran (Instagration doc B.4). Non-empty string
+   * when present.
+   */
+  provider_ran?: string
+  /**
+   * Opaque counterparty identifier the action transacted with (for example a
+   * recipient address, a downstream service id, a merchant ref). [0024]
+   * counterparty binding. This is a coarse/opaque reference, NOT the raw
+   * sensitive value: sensitive args are tokenized out via `pii_args`
+   * (`capabilities.ts`) before they reach the receipt. Non-empty string when
+   * present.
+   */
+  counterparty?: string
+  /**
+   * Lineage / result reference: an OID or provider-side reference that points
+   * to the produced result or the upstream call record (the [0024] "result
+   * id" + "lineage edge"). For content-addressed results this is a
+   * `sha256:<hex>` OID; for a provider call record it is that provider's
+   * opaque reference. Non-empty string when present.
+   */
+  upstream_ref?: string
 }
 
 // -- Item 3: Token Consumption -----------------------------------------------

@@ -22,6 +22,7 @@ import {
   validateChannelEventBody,
   validateGapDecisionReceipt,
   validateGapDecisionReceiptBody,
+  validateMeasuredResult,
   validateRevocationEvent,
   validateRevocationEventBody,
 } from '../src/index.js'
@@ -281,6 +282,46 @@ const goodReceiptBody = {
   const r = validateGapDecisionReceiptBody({ ...goodReceiptBody, initiator: { actor_oid: 'actor:abc' } })
   ok('receipt body: initiator missing actor_type => ok=false',
      !r.ok && r.errors.some((e) => e.includes('actor_type')))
+}
+// [0024]: measured result block on the receipt body -- backward compatible.
+{
+  const measured = {
+    cost_micro_usd: 2100,
+    latency_ms: 412,
+    provider_ran: 'composio',
+    counterparty: 'recipient:opaque-token-abc',
+    upstream_ref: 'sha256:0000000000000000000000000000000000000000000000000000000000000001',
+  }
+  const r = validateGapDecisionReceiptBody({ ...goodReceiptBody, measured })
+  ok('receipt body: full measured block => ok=true', r.ok, r.errors.join('; '))
+}
+{
+  const r = validateMeasuredResult({})
+  ok('measured: all fields absent => ok=true (backward compatible)', r.ok, r.errors.join('; '))
+}
+{
+  const r = validateMeasuredResult({ provider_ran: 'mcp' })
+  ok('measured: provider_ran only => ok=true', r.ok, r.errors.join('; '))
+}
+{
+  const r = validateMeasuredResult({ cost_micro_usd: -1 })
+  ok('measured: negative cost_micro_usd => ok=false',
+     !r.ok && r.errors.some((e) => e.includes('cost_micro_usd')))
+}
+{
+  const r = validateMeasuredResult({ cost_micro_usd: 0.5 })
+  ok('measured: float cost_micro_usd => ok=false (canonicalizer forbids floats)',
+     !r.ok && r.errors.some((e) => e.includes('cost_micro_usd')))
+}
+{
+  const r = validateMeasuredResult({ latency_ms: 12.5 })
+  ok('measured: non-integer latency_ms => ok=false',
+     !r.ok && r.errors.some((e) => e.includes('latency_ms')))
+}
+{
+  const r = validateMeasuredResult({ provider_ran: '' })
+  ok('measured: empty provider_ran => ok=false',
+     !r.ok && r.errors.some((e) => e.includes('provider_ran')))
 }
 
 // -- RevocationEvent ---------------------------------------------------------

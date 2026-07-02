@@ -102,6 +102,8 @@ export type {
   DecisionSubjectKind,
   // Item 3: Token Budget Governance
   TokenConsumption,
+  // [0024]: Measured result block (full-object signed receipt)
+  MeasuredResult,
 } from './receipts.js'
 
 // -- Revocations -------------------------------------------------------------
@@ -171,6 +173,8 @@ export {
   validateOrchestrationChain,
   // Item 3: Token Budget Governance
   validateTokenConsumption,
+  // [0024]: Measured result block
+  validateMeasuredResult,
   // Item 4: Consent Version Chain
   validateConsentRecordBody,
   validateConsentRecord,

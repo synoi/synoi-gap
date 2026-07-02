@@ -304,6 +304,30 @@ export function validateTokenConsumption(x: unknown): ValidationResult {
   )
 }
 
+// -- [0024]: Measured result validator ---------------------------------------
+
+/**
+ * [DESIGN] Validates a MeasuredResult block from a receipt body ([0024]:
+ * measured cost + quantity, result id, counterparty, lineage edge). Every
+ * field is optional (backward compatible); when present each is shape- and
+ * range-checked. cost_micro_usd and latency_ms must be non-negative integers
+ * (the GAP canonicalizer forbids floats, so a float cost would make the
+ * receipt unsignable); the string references must be non-empty.
+ */
+export function validateMeasuredResult(x: unknown): ValidationResult {
+  if (!isObject(x)) return fail('measured: expected object')
+  const isNonNegInt = (v: unknown): v is number =>
+    isNumber(v) && Number.isInteger(v) && (v as number) >= 0
+  const isNonEmptyString = (v: unknown): v is string => isString(v) && (v as string).length > 0
+  return merge(
+    optionalField('measured', x, 'cost_micro_usd', isNonNegInt, 'non-negative integer (micro-USD)'),
+    optionalField('measured', x, 'latency_ms', isNonNegInt, 'non-negative integer'),
+    optionalField('measured', x, 'provider_ran', isNonEmptyString, 'non-empty string'),
+    optionalField('measured', x, 'counterparty', isNonEmptyString, 'non-empty string'),
+    optionalField('measured', x, 'upstream_ref', isNonEmptyString, 'non-empty string'),
+  )
+}
+
 // -- Item 4: Consent record validator ----------------------------------------
 
 /**
@@ -821,6 +845,10 @@ export function validateGapDecisionReceiptBody(x: unknown): ValidationResult {
   // Item 3: token_consumption
   if (x['token_consumption'] !== undefined) {
     errors.push(validateTokenConsumption(x['token_consumption']))
+  }
+  // [0024]: measured result block
+  if (x['measured'] !== undefined) {
+    errors.push(validateMeasuredResult(x['measured']))
   }
   return merge(...errors)
 }

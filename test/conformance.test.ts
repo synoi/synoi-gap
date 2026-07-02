@@ -115,6 +115,59 @@ const V_INV_PAYLOAD = {
 const V_INV_OID = computeGapOid(V_INV_PAYLOAD)
 ok('OID: V_INV deterministic', computeGapOid(V_INV_PAYLOAD) === V_INV_OID)
 
+// -- V_RCPT_MEASURED: decision_receipt carrying the [0024] measured block ------
+// Proves the full-object receipt binds MEASURED cost + result + counterparty +
+// lineage INTO the signed content core: the measured block changes the OID, so
+// it is signed evidence of what the action actually cost, not merely that it
+// was allowed. cost_micro_usd is an INTEGER (micro-USD): the GAP canonicalizer
+// forbids floats, so a float cost would be unsignable. Task #33 / patent [0024].
+const V_RCPT_MEASURED_PAYLOAD = {
+  type: 'gap:decision_receipt',
+  tenant_id: 'tenant-conformance-1',
+  created_at_ms: 1717200003000,
+  created_by: 'actor:gateway',
+  body: {
+    subject_kind: 'capability_invocation',
+    subject_oid: 'sha256:0000000000000000000000000000000000000000000000000000000000000002',
+    initiator: { actor_oid: 'actor:skill-emailer', actor_type: 'skill' },
+    status: 'ok',
+    initiated_at_ms: 1717200003000,
+    resolved_at_ms: 1717200003412,
+    measured: {
+      cost_micro_usd: 2100,
+      latency_ms: 412,
+      provider_ran: 'composio',
+      counterparty: 'recipient:opaque-token-abc',
+      upstream_ref: 'sha256:0000000000000000000000000000000000000000000000000000000000000001',
+    },
+  },
+}
+// Pinned cross-run OID. Any change means the wire format drifted -- investigate.
+const V_RCPT_MEASURED_OID_PINNED = 'sha256:05d132740795dafe5ade51c1e9393ac80f4043ad8edbc57fea6a016decbafe52'
+const V_RCPT_MEASURED_OID = computeGapOid(V_RCPT_MEASURED_PAYLOAD)
+ok('OID: V_RCPT_MEASURED deterministic',
+   computeGapOid(V_RCPT_MEASURED_PAYLOAD) === V_RCPT_MEASURED_OID)
+ok('OID: V_RCPT_MEASURED matches pinned cross-run vector',
+   V_RCPT_MEASURED_OID === V_RCPT_MEASURED_OID_PINNED)
+ok('OID: V_RCPT_MEASURED has sha256: prefix', V_RCPT_MEASURED_OID.startsWith('sha256:'))
+ok('OID: V_RCPT_MEASURED is 64-char hex after prefix',
+   V_RCPT_MEASURED_OID.slice('sha256:'.length).length === 64 &&
+   /^[0-9a-f]+$/.test(V_RCPT_MEASURED_OID.slice('sha256:'.length)))
+// The measured block is INSIDE the signed content core: dropping it changes the OID.
+{
+  const withoutMeasured = JSON.parse(JSON.stringify(V_RCPT_MEASURED_PAYLOAD))
+  delete withoutMeasured.body.measured
+  ok('OID: dropping measured block changes the OID (measured is signed content)',
+     computeGapOid(withoutMeasured) !== V_RCPT_MEASURED_OID)
+}
+// Altering the measured cost changes the OID: the receipt is tamper-evident on cost.
+{
+  const altered = JSON.parse(JSON.stringify(V_RCPT_MEASURED_PAYLOAD))
+  altered.body.measured.cost_micro_usd = 2200
+  ok('OID: altering measured.cost_micro_usd changes the OID (tamper-evident cost)',
+     computeGapOid(altered) !== V_RCPT_MEASURED_OID)
+}
+
 // -- Empty-body declaration is deterministic ---------------------------------
 const V_EMPTY_BODY = {
   type: 'gap:capability_declaration',

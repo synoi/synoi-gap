@@ -249,6 +249,34 @@ function deepEqual(a: unknown, b: unknown): boolean {
   ok('round-trip receipt: deep equal', deepEqual(env, parsed))
 }
 
+// -- 8b. GapDecisionReceipt with [0024] measured block -----------------------
+
+{
+  const body: GapDecisionReceiptBody = {
+    subject_kind: 'capability_invocation',
+    subject_oid: 'sha256:inv-measured',
+    initiator: { actor_oid: 'actor:abc', actor_type: 'skill' },
+    status: 'ok',
+    initiated_at_ms: 1700000007000,
+    resolved_at_ms: 1700000007412,
+    measured: {
+      cost_micro_usd: 2100,
+      latency_ms: 412,
+      provider_ran: 'composio',
+      counterparty: 'recipient:opaque-token-abc',
+      upstream_ref: 'sha256:0000000000000000000000000000000000000000000000000000000000000001',
+    },
+  }
+  const env: GapDecisionReceipt =
+    buildEnvelope('gap:decision_receipt', 'tenant-rt', 'actor:gateway', body)
+  const parsed = JSON.parse(JSON.stringify(env)) as GapDecisionReceipt
+  const r = validateGapDecisionReceipt(parsed)
+  ok('round-trip receipt+measured: validates ok=true', r.ok, r.errors.join('; '))
+  ok('round-trip receipt+measured: deep equal', deepEqual(env, parsed))
+  ok('round-trip receipt+measured: provider_ran preserved',
+     parsed.body.measured?.provider_ran === 'composio')
+}
+
 // -- 9. RevocationEvent ------------------------------------------------------
 
 {

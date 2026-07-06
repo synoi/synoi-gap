@@ -1,0 +1,19 @@
+[package]
+name = "gap-core"
+version = "0.1.0"
+edition = "2021"
+description = "GAP (Governed-Action Protocol) core: RFC 8785 JCS canonicalization, OID computation, hybrid Ed25519 + ML-DSA-65 signature verify, and CDRO / decision-receipt content-core projection. Byte-for-byte cross-language conformant with the TypeScript and Python SDKs."
+license = "CC0-1.0"
+repository = "https://github.com/synoi/synoi-gap"
+homepage = "https://github.com/synoi/synoi-gap"
+rust-version = "1.74"
+
+[dependencies]
+serde_json = { version = "1.0", features = ["preserve_order", "arbitrary_precision"] }
+sha2 = "0.10"
+ed25519-dalek = "2.2"
+ml-dsa = "0.1.1"
+base64 = "0.22"
+hex = "0.4"
+
+[dev-dependencies]

@@ -244,10 +244,32 @@ export function receipt(input: ReceiptInput, options: ReceiptOptions = {}): Rece
 }
 
 /**
- * Verify a receipt's Ed25519 signature against the given public key. Purely
- * local; makes no network call. This checks "did this key sign this
- * envelope," not "is this key trustworthy to a third party" -- the latter is
- * what the neutral resolver (PENDING T15) will add.
+ * Verify a receipt's Ed25519 signature against the given public key, AND
+ * that envelope.oid is the correct content-addressed identity for this
+ * receipt. Purely local; makes no network call. This checks "did this key
+ * sign this envelope, and does its OID actually match its content," not "is
+ * this key trustworthy to a third party" -- the latter is what the neutral
+ * resolver (PENDING T15) will add.
+ *
+ * Security F2 (2026-07-12 quality gate): `oid`, `gap_version`, and
+ * `supersedes` are all in EXCLUDED_FIELDS (the SIGNED payload projection,
+ * signingPayload() above), because `oid` cannot sign itself and
+ * `gap_version`/`supersedes` were carried along in that same exclusion set.
+ * That meant the Ed25519 signature alone never actually bound `oid` (or
+ * `gap_version` / `supersedes`) to the signed content: a validly-signed
+ * envelope's `oid` (or `gap_version` / `supersedes`) could be swapped to any
+ * other value and this function would still return true, breaking
+ * content-addressing (a receipt could be re-labeled under a different
+ * identity, silently claim a different protocol version, or forge a
+ * `supersedes` lineage edge) without invalidating the signature.
+ *
+ * Fix: after the signature check passes, recompute the content-addressed OID
+ * the SAME way receipt() originally computed it (computeGapOid, which KEEPS
+ * gap_version and supersedes in its hash per ADR_019 / oid.ts's
+ * CDRO_ENVELOPE_FIELDS, even though signingPayload's EXCLUDED_FIELDS strips
+ * them from the signed bytes) and require it to equal envelope.oid. One
+ * check closes all three fields at once, because all three are inputs to
+ * computeGapOid even though none are inputs to the Ed25519 signature.
  */
 export function verifyReceiptSignature(
   envelope: GapCdroEnvelope<GapDecisionReceiptBody>,
@@ -256,9 +278,14 @@ export function verifyReceiptSignature(
   if (!envelope.signature) return false
   const canonical = canonicalize(signingPayload(envelope as unknown as Record<string, unknown>))
   const sigBytes = Buffer.from(envelope.signature, 'base64url')
+  let sigValid: boolean
   try {
-    return ed25519.verify(sigBytes, new TextEncoder().encode(canonical), publicKey)
+    sigValid = ed25519.verify(sigBytes, new TextEncoder().encode(canonical), publicKey)
   } catch {
     return false
   }
+  if (!sigValid) return false
+  // oid/gap_version/supersedes rebind (Security F2): the signature alone
+  // does not cover these fields; the content-addressed OID must still match.
+  return computeGapOid(envelope) === envelope.oid
 }

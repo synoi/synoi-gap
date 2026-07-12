@@ -164,5 +164,31 @@ const tamperedScheme = { ...r1.envelope, receipt_scheme: 'synoi.receipt/v2' }
 ok('verifyReceiptSignature: tampered receipt_scheme fails verification',
    !verifyReceiptSignature(tamperedScheme, r1.keyPair.publicKey))
 
+// 14. Security F2 (2026-07-12 quality gate): oid/gap_version/supersedes are
+//     all in signingPayload's EXCLUDED_FIELDS, so the Ed25519 signature alone
+//     never covered them. A validly-signed envelope with any of these three
+//     fields swapped MUST still fail verifyReceiptSignature via the
+//     computeGapOid rebind check, or content-addressing (and the
+//     Merkle-lineage supersedes edge) is forgeable without invalidating the
+//     signature.
+const tamperedOid = { ...r1.envelope, oid: 'sha256:' + 'ff'.repeat(32) }
+ok('verifyReceiptSignature: tampered oid (signature bytes otherwise untouched) fails verification',
+   !verifyReceiptSignature(tamperedOid, r1.keyPair.publicKey))
+
+const tamperedGapVersion = { ...r1.envelope, gap_version: '2.0' as unknown as typeof r1.envelope.gap_version }
+ok('verifyReceiptSignature: tampered gap_version fails verification (protocol-downgrade forgery closed)',
+   !verifyReceiptSignature(tamperedGapVersion, r1.keyPair.publicKey))
+
+const tamperedSupersedes = { ...r1.envelope, supersedes: 'sha256:' + 'aa'.repeat(32) }
+ok('verifyReceiptSignature: forged supersedes lineage edge fails verification',
+   !verifyReceiptSignature(tamperedSupersedes, r1.keyPair.publicKey))
+
+// Sanity: the UNTAMPERED envelope's own oid genuinely equals computeGapOid
+// over itself (the rebind check's happy path is not vacuously true).
+ok('verifyReceiptSignature: rebind check sanity -- untampered oid equals computeGapOid(envelope)',
+   r1.envelope.oid === computeGapOid(r1.envelope))
+ok('verifyReceiptSignature: untampered envelope still verifies TRUE (rebind check does not false-positive)',
+   verifyReceiptSignature(r1.envelope, r1.keyPair.publicKey))
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

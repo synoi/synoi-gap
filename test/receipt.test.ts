@@ -190,5 +190,64 @@ ok('verifyReceiptSignature: rebind check sanity -- untampered oid equals compute
 ok('verifyReceiptSignature: untampered envelope still verifies TRUE (rebind check does not false-positive)',
    verifyReceiptSignature(r1.envelope, r1.keyPair.publicKey))
 
+// 15. ADVERSARY re-clear (2026-07-12): the oid-rebind check alone catches
+//     only a LAZY attacker who mutates a field but leaves oid stale (test 14
+//     above). computeGapOid is a PUBLIC, UNKEYED sha256 -- an attacker with
+//     no secret can mutate a field, RECOMPUTE a matching oid, and reuse the
+//     ORIGINAL signature bytes unchanged. Before the EXCLUDED_FIELDS fix
+//     (bringing gap_version/supersedes/signature_key_id into the signed
+//     payload), this recompute-oid variant verified TRUE -- the actual live
+//     attack, not defended by the rebind check alone. Each variant below
+//     mutates a field AND recomputes a matching oid the same way receipt()
+//     does, then reuses the original signature; all three MUST verify FALSE
+//     now that those fields are bound into the Ed25519 signature itself.
+
+function recomputeOidFor(envelope: typeof r1.envelope): string {
+  return computeGapOid({
+    type: envelope.type,
+    gap_version: envelope.gap_version,
+    receipt_scheme: envelope.receipt_scheme,
+    tenant_id: envelope.tenant_id,
+    created_at_ms: envelope.created_at_ms,
+    created_by: envelope.created_by,
+    body: envelope.body,
+    supersedes: envelope.supersedes,
+  })
+}
+
+// 15a. gap_version mutated AND oid recomputed to match -- the exact Adversary
+//      proof: "gap_version mutated AND oid recomputed to match -> TRUE, the
+//      actual attack, NOT defended" against the old code.
+const forgedGapVersion = {
+  ...r1.envelope,
+  gap_version: '2.0' as unknown as typeof r1.envelope.gap_version,
+}
+forgedGapVersion.oid = recomputeOidFor(forgedGapVersion)
+ok('ADVERSARY: gap_version mutated + oid recomputed to match + original signature reused -> MUST fail',
+   !verifyReceiptSignature(forgedGapVersion, r1.keyPair.publicKey))
+
+// 15b. supersedes forged AND oid recomputed to match (Merkle-lineage edge
+//      forgery with no secret required).
+const forgedSupersedes = {
+  ...r1.envelope,
+  supersedes: 'sha256:' + 'bb'.repeat(32),
+}
+forgedSupersedes.oid = recomputeOidFor(forgedSupersedes)
+ok('ADVERSARY: supersedes forged + oid recomputed to match + original signature reused -> MUST fail',
+   !verifyReceiptSignature(forgedSupersedes, r1.keyPair.publicKey))
+
+// 15c. signature_key_id swapped AND oid recomputed to match. signature_key_id
+//      is not part of computeGapOid's content core either way (it is one of
+//      the six normative CDRO_ENVELOPE_FIELDS), so the oid does not even need
+//      to change here -- which is exactly why it must be bound into the
+//      SIGNATURE instead: an attacker could otherwise relabel which key
+//      "signed" a receipt while keeping oid and signature bytes untouched.
+const forgedKeyId = {
+  ...r1.envelope,
+  signature_key_id: otherKeyPair.keyId ?? 'key:attacker-controlled',
+}
+ok('ADVERSARY: signature_key_id swapped (oid unaffected either way, signature reused) -> MUST fail',
+   !verifyReceiptSignature(forgedKeyId, r1.keyPair.publicKey))
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

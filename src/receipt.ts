@@ -8,18 +8,21 @@
  *
  * What this wraps, and nothing more:
  *   - `computeGapOid` / `canonicalize` (oid.ts / canonicalize.ts) for the
- *     content-addressed OID -- the SAME canonicalizer and exclusion set
- *     GapDecisionReceipt.oid already uses. No second canonicalizer.
+ *     content-addressed OID -- the SAME canonicalizer `GapDecisionReceipt.oid`
+ *     already uses, over `computeGapOid`'s own normative exclusion set
+ *     (CDRO_ENVELOPE_FIELDS, oid.ts). No second canonicalizer.
  *   - A single Ed25519 signature (`@noble/curves`, already a declared
- *     dependency) over `canonicalize(envelope minus excluded fields)` --
- *     the identical exclusion set and signing surface `computeGapOid`
- *     already strips (`oid`, `gap_version`, `signature`, `signature_key_id`,
- *     `supersedes`). This mirrors the gateway's v1 signing shape
- *     (synoi-gateway/src/gap/receipt-sign.ts: signGapReceipt) at the
- *     single-Ed25519-key, self-custody tier; it does not attempt the
- *     gateway's ML-DSA-65 hybrid or KMS-backed oracle path, which require
- *     managed custody (T6/T14, PENDING) that this free/self-host tier does
- *     not have.
+ *     dependency) over `canonicalize(envelope minus excluded fields)`, using
+ *     this file's OWN, narrower `EXCLUDED_FIELDS` (see below) -- narrower
+ *     than computeGapOid's set on purpose, so that `gap_version`,
+ *     `supersedes`, and `signature_key_id` are bound INTO the signature
+ *     rather than left free for a no-secret-needed forgery (Adversary
+ *     re-clear, 2026-07-12; see the comment on `EXCLUDED_FIELDS`). This
+ *     mirrors the gateway's v1 signing shape (synoi-gateway/src/gap/
+ *     receipt-sign.ts: signGapReceipt) at the single-Ed25519-key,
+ *     self-custody tier; it does not attempt the gateway's ML-DSA-65 hybrid
+ *     or KMS-backed oracle path, which require managed custody (T6/T14,
+ *     PENDING) that this free/self-host tier does not have.
  *
  * What this explicitly does NOT do:
  *   - No network calls. `verifyUrlBase` only formats a string; nothing is
@@ -95,8 +98,38 @@ function defaultKeyId(publicKey: Uint8Array): string {
   return 'key:' + bytesToHex(publicKey).slice(0, 16)
 }
 
-/** Fields excluded from the OID hash / signing payload, per GAP spec §2.1. */
-const EXCLUDED_FIELDS = new Set(['oid', 'gap_version', 'signature', 'signature_key_id', 'supersedes'])
+/**
+ * Fields excluded from the Ed25519 SIGNING payload for the gap-selfsign
+ * tier. Adversary re-clear (2026-07-12): the original set here mirrored
+ * computeGapOid's CDRO_ENVELOPE_FIELDS (oid.ts), which strips `gap_version`
+ * and `supersedes` too -- but that OID exclusion set exists for a DIFFERENT
+ * reason (letting a pre- and post-attestation object hash to the same OID)
+ * and is wrong to reuse here. computeGapOid is a PUBLIC, UNKEYED sha256: an
+ * attacker who mutates a field that is excluded from the SIGNATURE can
+ * recompute a matching oid with no secret at all and reuse the original
+ * signature bytes unchanged, so the old oid-rebind check in
+ * verifyReceiptSignature (below) caught nothing beyond a lazy attacker who
+ * forgot to recompute the oid.
+ *
+ * Fix: minimize this set to ONLY the fields that structurally cannot be
+ * signed -- the signature-carrying fields themselves (`signature`,
+ * `ml_dsa_signature` and `attestation`, the latter two not populated by this
+ * package's envelope shape today but excluded defensively since they are
+ * signer-stamped-after-hash by construction) and the self-referential `oid`
+ * (an output cannot be its own input). `gap_version`, `supersedes`,
+ * `signature_key_id`, and `signature_algorithm` are all known BEFORE
+ * signing, so they now go INTO the signed bytes: mutating any of them after
+ * signing invalidates the Ed25519 signature itself, no oid-recompute attack
+ * possible. The oid-rebind check stays as defense in depth.
+ *
+ * Scope: this set is LOCAL to receipt.ts's self-sign (gap-selfsign) tier. It
+ * is separate from, and does not affect, computeGapOid's CDRO_ENVELOPE_FIELDS
+ * (oid.ts, shared normative OID projection used by both tiers) or the
+ * gateway's v2 KMS-hybrid DSSE signing payload (synoi-gateway's
+ * receipt-sign.ts, a different file in a different repo with its own
+ * signing-payload construction).
+ */
+const EXCLUDED_FIELDS = new Set(['oid', 'signature', 'ml_dsa_signature', 'attestation'])
 
 function signingPayload(envelope: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -230,12 +263,19 @@ export function receipt(input: ReceiptInput, options: ReceiptOptions = {}): Rece
     created_at_ms: contentCore.created_at_ms,
     created_by: contentCore.created_by,
     body: contentCore.body,
+    // signature_key_id is now part of the SIGNED payload (Adversary re-clear,
+    // 2026-07-12: see EXCLUDED_FIELDS above), so it MUST be stamped on the
+    // envelope BEFORE the canonical signing payload is built below -- signing
+    // it, then assigning it afterward, would sign an envelope that does not
+    // yet carry a signature_key_id while verification would recompute the
+    // canonical payload from an envelope that does, producing two different
+    // byte strings and failing even a genuinely untampered receipt.
+    signature_key_id: keyId,
   }
 
   const canonical = canonicalize(signingPayload(envelope as unknown as Record<string, unknown>))
   const signatureBytes = ed25519.sign(new TextEncoder().encode(canonical), keyPair.privateKey)
   envelope.signature = Buffer.from(signatureBytes).toString('base64url')
-  envelope.signature_key_id = keyId
 
   const verifyUrlBase = options.verifyUrlBase === undefined ? DEFAULT_VERIFY_URL_BASE : options.verifyUrlBase
   const verifyUrl = verifyUrlBase === null ? null : `${verifyUrlBase}/r/${oid}`
@@ -251,25 +291,30 @@ export function receipt(input: ReceiptInput, options: ReceiptOptions = {}): Rece
  * this key trustworthy to a third party" -- the latter is what the neutral
  * resolver (PENDING T15) will add.
  *
- * Security F2 (2026-07-12 quality gate): `oid`, `gap_version`, and
- * `supersedes` are all in EXCLUDED_FIELDS (the SIGNED payload projection,
- * signingPayload() above), because `oid` cannot sign itself and
- * `gap_version`/`supersedes` were carried along in that same exclusion set.
- * That meant the Ed25519 signature alone never actually bound `oid` (or
- * `gap_version` / `supersedes`) to the signed content: a validly-signed
- * envelope's `oid` (or `gap_version` / `supersedes`) could be swapped to any
- * other value and this function would still return true, breaking
- * content-addressing (a receipt could be re-labeled under a different
- * identity, silently claim a different protocol version, or forge a
- * `supersedes` lineage edge) without invalidating the signature.
+ * Security F2 (2026-07-12 quality gate) shipped an oid-rebind check here
+ * (recompute computeGapOid(envelope) and require it to equal envelope.oid)
+ * on the theory that it closed a gap_version/supersedes/oid tamper. Adversary
+ * re-clear (2026-07-12) proved that check INCOMPLETE, and demonstrated the
+ * live attack: computeGapOid is a PUBLIC, UNKEYED sha256 -- an attacker does
+ * not need the signing key to recompute it. Since `gap_version` and
+ * `supersedes` were excluded from the SIGNED payload (signingPayload's old,
+ * broader EXCLUDED_FIELDS), an attacker could mutate `gap_version` (or
+ * `supersedes`), recompute a new `oid` that matches the mutated content with
+ * NO secret required, reuse the ORIGINAL signature bytes unchanged (since
+ * the signature never covered those fields), and this function returned
+ * TRUE: the oid-rebind check trivially passes because it is recomputed from
+ * the very same mutated object it is meant to be checking.
  *
- * Fix: after the signature check passes, recompute the content-addressed OID
- * the SAME way receipt() originally computed it (computeGapOid, which KEEPS
- * gap_version and supersedes in its hash per ADR_019 / oid.ts's
- * CDRO_ENVELOPE_FIELDS, even though signingPayload's EXCLUDED_FIELDS strips
- * them from the signed bytes) and require it to equal envelope.oid. One
- * check closes all three fields at once, because all three are inputs to
- * computeGapOid even though none are inputs to the Ed25519 signature.
+ * Actual fix: `EXCLUDED_FIELDS` (above) now excludes ONLY `oid`, `signature`,
+ * `ml_dsa_signature`, and `attestation` -- the fields that structurally
+ * cannot be signed. `gap_version`, `supersedes`, and `signature_key_id` are
+ * now part of the signed bytes, so mutating any of them invalidates the
+ * Ed25519 signature itself; recomputing a matching oid no longer helps an
+ * attacker, because the signature check now fails first. The oid-rebind
+ * check below is kept as defense in depth (it still catches a signed
+ * envelope whose oid was independently corrupted without re-signing), but it
+ * is no longer the primary defense against this class of forgery -- the
+ * signed-payload minimization is.
  */
 export function verifyReceiptSignature(
   envelope: GapCdroEnvelope<GapDecisionReceiptBody>,
@@ -285,7 +330,8 @@ export function verifyReceiptSignature(
     return false
   }
   if (!sigValid) return false
-  // oid/gap_version/supersedes rebind (Security F2): the signature alone
-  // does not cover these fields; the content-addressed OID must still match.
+  // Defense in depth (Security F2, still correct as a second layer): the
+  // content-addressed OID must match, on top of gap_version/supersedes/
+  // signature_key_id now being bound into the signature itself (above).
   return computeGapOid(envelope) === envelope.oid
 }

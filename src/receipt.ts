@@ -47,6 +47,15 @@ import type { GapDecisionReceiptBody, DecisionStatus } from './receipts.js'
 export const DEFAULT_VERIFY_URL_BASE = 'https://oid.synoi.systems'
 
 /**
+ * The `receipt_scheme` value `receipt()` stamps on every envelope it
+ * produces. Consumed by @synoi/verify's fail-closed `verifyReceiptByScheme`
+ * dispatcher to route to the matching single-Ed25519 self-sign verifier.
+ * Bound into the signed bytes (not in EXCLUDED_FIELDS below), so a receipt
+ * cannot claim this tier without actually being signed as one.
+ */
+export const RECEIPT_SCHEME_GAP_SELFSIGN = 'synoi.receipt/gap-selfsign'
+
+/**
  * A locally generated or caller-supplied Ed25519 keypair used to self-sign
  * a receipt. `privateKey` never leaves the process; nothing here transmits
  * it anywhere.
@@ -203,6 +212,7 @@ export function receipt(input: ReceiptInput, options: ReceiptOptions = {}): Rece
   const contentCore = {
     type: 'gap:decision_receipt' as const,
     gap_version: '1.0' as const,
+    receipt_scheme: RECEIPT_SCHEME_GAP_SELFSIGN,
     tenant_id: input.tenantId ?? 'self',
     created_at_ms: initiatedAtMs,
     created_by: input.createdBy ?? keyId,
@@ -215,6 +225,7 @@ export function receipt(input: ReceiptInput, options: ReceiptOptions = {}): Rece
     oid,
     type: contentCore.type,
     gap_version: contentCore.gap_version,
+    receipt_scheme: contentCore.receipt_scheme,
     tenant_id: contentCore.tenant_id,
     created_at_ms: contentCore.created_at_ms,
     created_by: contentCore.created_by,

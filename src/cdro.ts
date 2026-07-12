@@ -75,6 +75,18 @@ export interface GapCdroEnvelope<TBody> {
   signature_key_id?: string
   /** OID of a prior CDRO that this one replaces. */
   supersedes?: string
+  /**
+   * Optional receipt-tier discriminator. Not part of the six detached-signature
+   * envelope fields (it is KEPT in the OID content core and the signed bytes,
+   * same treatment as gap_version), so it is tamper-evident: a receipt cannot
+   * claim a different tier after signing. Consumed by @synoi/verify's
+   * fail-closed `verifyReceiptByScheme` dispatcher. Known values today:
+   * 'synoi.receipt/v2' (gateway KMS-hybrid DSSE tier, set out-of-band by the
+   * gateway, not by this package) and 'synoi.receipt/gap-selfsign' (this
+   * package's single-Ed25519 `receipt()` self-sign tier, receipt.ts). Absent
+   * on receipts predating this field.
+   */
+  receipt_scheme?: string
 }
 
 /**

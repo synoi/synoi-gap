@@ -70,12 +70,13 @@ ok('verifyReceiptSignature: wrong public key fails verification',
 const recomputedOid = computeGapOid({
   type: r1.envelope.type,
   gap_version: r1.envelope.gap_version,
+  receipt_scheme: r1.envelope.receipt_scheme,
   tenant_id: r1.envelope.tenant_id,
   created_at_ms: r1.envelope.created_at_ms,
   created_by: r1.envelope.created_by,
   body: r1.envelope.body,
 })
-ok('receipt() oid matches computeGapOid over the content core (incl. gap_version)',
+ok('receipt() oid matches computeGapOid over the content core (incl. gap_version, receipt_scheme)',
    r1.envelope.oid === recomputedOid)
 
 // 6. computeGapOid also matches when passed the FULL envelope (oid/signature
@@ -141,6 +142,27 @@ ok('receipt() honors explicit status/detail/timing',
 //     review) and no network available in this sandboxed test run; every
 //     assertion above completed without an await on any I/O.
 ok('receipt() calls above completed synchronously (no network round-trip)', true)
+
+// 13. receipt_scheme discriminator (lite carve-out, ADR_014 Section 10.1):
+//     stamped on every envelope, bound into the OID + signature (tamper-evident).
+import { RECEIPT_SCHEME_GAP_SELFSIGN } from '../src/index.js'
+ok('receipt() stamps receipt_scheme = RECEIPT_SCHEME_GAP_SELFSIGN',
+   r1.envelope.receipt_scheme === RECEIPT_SCHEME_GAP_SELFSIGN)
+ok('RECEIPT_SCHEME_GAP_SELFSIGN is the documented wire value',
+   RECEIPT_SCHEME_GAP_SELFSIGN === 'synoi.receipt/gap-selfsign')
+ok('receipt_scheme participates in the OID (content-addressed, not a bare label)',
+   r1.envelope.oid === computeGapOid({
+     type: r1.envelope.type,
+     gap_version: r1.envelope.gap_version,
+     receipt_scheme: r1.envelope.receipt_scheme,
+     tenant_id: r1.envelope.tenant_id,
+     created_at_ms: r1.envelope.created_at_ms,
+     created_by: r1.envelope.created_by,
+     body: r1.envelope.body,
+   }))
+const tamperedScheme = { ...r1.envelope, receipt_scheme: 'synoi.receipt/v2' }
+ok('verifyReceiptSignature: tampered receipt_scheme fails verification',
+   !verifyReceiptSignature(tamperedScheme, r1.keyPair.publicKey))
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

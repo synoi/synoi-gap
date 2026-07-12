@@ -155,6 +155,7 @@ export {
   generateReceiptKeyPair,
   verifyReceiptSignature,
   DEFAULT_VERIFY_URL_BASE,
+  RECEIPT_SCHEME_GAP_SELFSIGN,
 } from './receipt.js'
 export type {
   Receipt,

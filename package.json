@@ -19,7 +19,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "tsx test/types.test.ts && tsx test/validate.test.ts && tsx test/oid.test.ts && tsx test/round-trip.test.ts && tsx test/conformance.test.ts && tsx test/receipt.test.ts && tsx test/reserved-mcp-name.test.ts"
+    "test": "tsx test/types.test.ts && tsx test/validate.test.ts && tsx test/oid.test.ts && tsx test/round-trip.test.ts && tsx test/conformance.test.ts && tsx test/receipt.test.ts && tsx test/reserved-mcp-name.test.ts",
+    "gen:conformance-vectors": "tsx scripts/gen-conformance-vectors.ts"
   },
   "dependencies": {
     "@noble/curves": "^2.2.0",

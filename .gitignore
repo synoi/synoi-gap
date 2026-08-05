@@ -11,3 +11,4 @@ demo/.demo-state.json
 __pycache__/
 *.pyc
 .claude/
+*.egg-info/

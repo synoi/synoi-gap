@@ -38,6 +38,12 @@ export type GapObjectType =
   | 'gap:orchestration_chain'     // DRAFT: agent delegation chain (Item 1)
   | 'gap:consent_record'          // DRAFT: consent version chain (Item 4)
   | 'gap:pip_response'            // DRAFT: signed PIP response (Item 7)
+  // DRAFT: perimeter declaration (`synoi.perimeter.v1`, perimeter.ts). The
+  // signed scope statement a completeness assertion is complete WITHIN: which
+  // chokepoints are active at what enforcement quality, and which surfaces are
+  // NOT covered. Registered here rather than shipped unregistered, which is
+  // what `gap:state_absence` and `observed_state` did.
+  | 'gap:perimeter_declaration'
 
 /** Current GAP wire version. CDROs that don't match this version are
  *  rejected by validators. */

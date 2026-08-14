@@ -110,6 +110,36 @@ export type {
   MeasuredResult,
 } from './receipts.js'
 
+// -- Perimeter declaration (`synoi.perimeter.v1`) ----------------------------
+// The signed scope statement a completeness claim is complete WITHIN. Exported
+// from the open package on purpose: a third party must be able to read a
+// blind-spot list and check a perimeter chain without asking SynOI anything.
+export {
+  PERIMETER_DECLARATION_OBJECT_TYPE,
+  PERIMETER_DECLARATION_SCHEMA,
+  CHOKEPOINT_CLASSES,
+  CHOKEPOINT_CLASS_ENFORCEMENT_CEILING,
+  ENFORCEMENT_QUALITIES,
+  ENFORCEMENT_RANK,
+  enforcementWithinCeiling,
+  classifySurface,
+  verifyPerimeterChain,
+  renderPerimeterDeclaration,
+} from './perimeter.js'
+export type {
+  ChokepointClass,
+  EnforcementQuality,
+  PerimeterBlindSpot,
+  PerimeterChainReason,
+  PerimeterChainResult,
+  PerimeterChokepoint,
+  PerimeterCompletenessScope,
+  PerimeterDeclaration,
+  PerimeterDeclarationBody,
+  PerimeterGovernedSubject,
+  SurfaceClassification,
+} from './perimeter.js'
+
 // -- Revocations -------------------------------------------------------------
 export {
   revokeGapObject,
@@ -200,4 +230,7 @@ export {
   // Item 7: Signed PIP Response
   validatePipResponseBody,
   validatePipResponse,
+  // Perimeter declaration
+  validatePerimeterDeclarationBody,
+  validatePerimeterDeclaration,
 } from './validate.js'

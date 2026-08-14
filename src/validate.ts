@@ -58,6 +58,14 @@ import type {
   RevocationEvent,
   RevocationEventBody,
 } from './revocations.js'
+import {
+  CHOKEPOINT_CLASSES,
+  CHOKEPOINT_CLASS_ENFORCEMENT_CEILING,
+  ENFORCEMENT_QUALITIES,
+  PERIMETER_DECLARATION_SCHEMA,
+  enforcementWithinCeiling,
+} from './perimeter.js'
+import type { ChokepointClass, EnforcementQuality } from './perimeter.js'
 
 // -- Result + small helpers --------------------------------------------------
 
@@ -134,6 +142,8 @@ const GAP_OBJECT_TYPES: readonly GapObjectType[] = [
   'gap:consent_record',
   // Item 7: Signed PIP Response
   'gap:pip_response',
+  // Perimeter declaration (`synoi.perimeter.v1`, perimeter.ts)
+  'gap:perimeter_declaration',
 ]
 
 function validateEnvelopeShape(x: unknown, expectedType: GapObjectType): ValidationResult {
@@ -402,6 +412,128 @@ export function validatePipResponseBody(x: unknown): ValidationResult {
     optionalField('body', x, 'pip_signature', isString, 'string'),
     optionalField('body', x, 'pip_signature_alg', isString, 'string'),
   )
+}
+
+// -- Perimeter declaration validator -----------------------------------------
+
+const isChokepointClass    = isOneOf(CHOKEPOINT_CLASSES)
+const isEnforcementQuality = isOneOf(ENFORCEMENT_QUALITIES)
+
+/** `sha256:<64 hex>`, the OID form used by evidence_ref and prev. */
+function isOid(v: unknown): v is string {
+  return isString(v) && /^sha256:[0-9a-f]{64}$/i.test(v)
+}
+
+function validateChokepoint(parent: string, c: unknown): ValidationResult {
+  if (!isObject(c)) return fail(`${parent}: expected object`)
+  const base = merge(
+    requireField(parent, c, 'class', isChokepointClass, '"C1" | "C2" | "C3" | "C4" | "C5" | "C6" | "C7"'),
+    requireField(parent, c, 'surface', (v) => isString(v) && (v as string).length > 0, 'non-empty string'),
+    requireField(parent, c, 'enforcement', isEnforcementQuality,
+      '"structural" | "cooperative" | "observational"'),
+    optionalField(parent, c, 'evidence_ref', isOid, '"sha256:<hex>" OID'),
+  )
+  if (!base.ok) return base
+
+  // The one content-integrity rule: a chokepoint may claim WEAKER enforcement
+  // than its class allows, never stronger. C7 is observational by construction
+  // and C6 shares the workload's trust domain, so "C7, structural" is not a
+  // debatable characterization, it is a false statement about the mechanism.
+  const cls = c['class'] as ChokepointClass
+  const claimed = c['enforcement'] as EnforcementQuality
+  if (!enforcementWithinCeiling(cls, claimed)) {
+    return fail(
+      `${parent}.enforcement: "${claimed}" exceeds the ceiling for ${cls} ` +
+      `("${CHOKEPOINT_CLASS_ENFORCEMENT_CEILING[cls]}")`,
+    )
+  }
+  return ok()
+}
+
+function validateBlindSpot(parent: string, s: unknown): ValidationResult {
+  if (!isObject(s)) return fail(`${parent}: expected object`)
+  return merge(
+    requireField(parent, s, 'surface', (v) => isString(v) && (v as string).length > 0, 'non-empty string'),
+    requireField(parent, s, 'reason', (v) => isString(v) && (v as string).length > 0, 'non-empty string'),
+    requireField(parent, s, 'class_unavailable', isChokepointClass,
+      '"C1" | "C2" | "C3" | "C4" | "C5" | "C6" | "C7"'),
+  )
+}
+
+function validateGovernedSubject(parent: string, s: unknown): ValidationResult {
+  if (!isObject(s)) return fail(`${parent}: expected object`)
+  return merge(
+    requireField(parent, s, 'platform', (v) => isString(v) && (v as string).length > 0, 'non-empty string'),
+    requireField(parent, s, 'workspace_id', (v) => isString(v) && (v as string).length > 0, 'non-empty string'),
+    optionalField(parent, s, 'repl_id', isString, 'string'),
+    optionalField(parent, s, 'deployment_id', isString, 'string'),
+  )
+}
+
+function validateCompletenessScope(parent: string, s: unknown): ValidationResult {
+  if (!isObject(s)) return fail(`${parent}: expected object`)
+  const base = merge(
+    requireField(parent, s, 'populations',
+      (v) => isArray(v) && (v as unknown[]).every(p => isString(p) && (p as string).length > 0),
+      'array of non-empty strings'),
+    requireField(parent, s, 'from_seq', (v) => isInteger(v) && (v as number) >= 0, 'non-negative integer'),
+    requireField(parent, s, 'to_seq', (v) => isInteger(v) && (v as number) >= 0, 'non-negative integer'),
+  )
+  if (!base.ok) return base
+  if ((s['from_seq'] as number) > (s['to_seq'] as number)) {
+    return fail(`${parent}: from_seq must be <= to_seq`)
+  }
+  return ok()
+}
+
+/**
+ * Validate a `synoi.perimeter.v1` body.
+ *
+ * Empty `chokepoints_active` and empty `blind_spots` are both ACCEPTED. A
+ * deployment that governs nothing yet is a legitimate and honest declaration,
+ * and refusing to let one be signed would push operators toward declaring a
+ * chokepoint they do not have. An empty blind-spot list is a positive claim
+ * that everything is covered; the object records it, and a reader is told to
+ * check it (see renderPerimeterDeclaration).
+ */
+export function validatePerimeterDeclarationBody(x: unknown): ValidationResult {
+  if (!isObject(x)) return fail('body: expected object')
+
+  const errors: ValidationResult[] = [
+    requireField('body', x, 'schema', (v) => v === PERIMETER_DECLARATION_SCHEMA,
+      `"${PERIMETER_DECLARATION_SCHEMA}"`),
+    requireField('body', x, 'governed_subject', isObject, 'object'),
+    requireField('body', x, 'chokepoints_active', isArray, 'array'),
+    requireField('body', x, 'blind_spots', isArray, 'array'),
+    requireField('body', x, 'completeness_scope', isObject, 'object'),
+    requireField('body', x, 'effective_from_ms', isInteger, 'integer'),
+    optionalField('body', x, 'effective_to_ms', isInteger, 'integer'),
+    optionalField('body', x, 'prev', isOid, '"sha256:<hex>" OID'),
+  ]
+
+  if (isObject(x['governed_subject'])) {
+    errors.push(validateGovernedSubject('body.governed_subject', x['governed_subject']))
+  }
+  if (isObject(x['completeness_scope'])) {
+    errors.push(validateCompletenessScope('body.completeness_scope', x['completeness_scope']))
+  }
+  if (isArray(x['chokepoints_active'])) {
+    (x['chokepoints_active'] as unknown[]).forEach((c, i) => {
+      errors.push(validateChokepoint(`body.chokepoints_active[${i}]`, c))
+    })
+  }
+  if (isArray(x['blind_spots'])) {
+    (x['blind_spots'] as unknown[]).forEach((s, i) => {
+      errors.push(validateBlindSpot(`body.blind_spots[${i}]`, s))
+    })
+  }
+
+  if (isInteger(x['effective_from_ms']) && isInteger(x['effective_to_ms'])
+      && (x['effective_to_ms'] as number) < (x['effective_from_ms'] as number)) {
+    errors.push(fail('body.effective_to_ms: must be >= effective_from_ms'))
+  }
+
+  return merge(...errors)
 }
 
 // -- Body validators ---------------------------------------------------------
@@ -995,6 +1127,12 @@ export function validatePipResponse(x: unknown): ValidationResult {
   const env = validateEnvelopeShape(x, 'gap:pip_response')
   if (!env.ok) return env
   return merge(env, validatePipResponseBody((x as GapCdroEnvelope<unknown>).body))
+}
+
+export function validatePerimeterDeclaration(x: unknown): ValidationResult {
+  const env = validateEnvelopeShape(x, 'gap:perimeter_declaration')
+  if (!env.ok) return env
+  return merge(env, validatePerimeterDeclarationBody((x as GapCdroEnvelope<unknown>).body))
 }
 
 // -- Note on imports ---------------------------------------------------------

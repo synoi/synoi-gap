@@ -1,11 +1,25 @@
 /**
  * oid.ts -- OID computation for GAP CDROs.
  *
- * This is the CDRO OID content-core projection defined normatively in
- * synoi-sraid/PROJECTION_SPEC.md (ADR_019 decisions 1-3). It is DERIVED from
- * that one written source, not re-invented here; a byte-for-byte divergence
- * from the reference implementation (@synoi/sraid src/oid.ts) is
- * non-conformant and is caught by the shared conformance vectors.
+ * The CDRO OID content-core projection is IMPORTED from @synoi/sraid, not
+ * reimplemented here.
+ *
+ * It used to be reimplemented, derived faithfully from
+ * synoi-sraid/PROJECTION_SPEC.md, with the correct six-name strip set, on the
+ * stated assumption that "a byte-for-byte divergence from the reference
+ * implementation is caught by the shared conformance vectors". That assumption
+ * was false in both halves. The copy diverged - it carried the same __proto__
+ * OID collision as the reference, because the prose "remove exactly these six
+ * fields, keep everything else" translates in JavaScript into `core[k] = v`,
+ * which silently drops an own __proto__ - and no conformance vector covered
+ * that shape, so nothing caught it. Two teams reading correct prose wrote the
+ * same defect.
+ *
+ * The original reason for the copy was real: sraid's default entry imports
+ * node:crypto and this package must stay portable. The projection never needed
+ * crypto - only the hashing did - so it now comes from the PURE
+ * @synoi/sraid/content-core subpath while the hash stays @noble here. Identical
+ * by construction rather than by agreement.
  *
  *     OID = "sha256:" + hex(sha256(canonicalize(cdroContentCore(object))))
  *
@@ -20,6 +34,10 @@
 
 import { sha256 } from '@noble/hashes/sha256'
 import { canonicalize } from './canonicalize.js'
+// THE normative projection, imported rather than reimplemented. Pure subpath:
+// no node:crypto in its graph, so this package stays portable and keeps its
+// own @noble hash. See the header note above.
+import { cdroContentCore } from '@synoi/sraid/content-core'
 
 /** Convert a Uint8Array to a lowercase hex string. */
 function bytesToHex(bytes: Uint8Array): string {
@@ -53,37 +71,6 @@ function bytesToHex(bytes: Uint8Array): string {
  * `gap_version` (so a protocol downgrade is OID-detectable) and `supersedes`
  * (so the SRAID Merkle-DAG lineage edge is tamper-evident).
  */
-const CDRO_ENVELOPE_FIELDS = Object.freeze([
-  'oid',
-  'signature',
-  'ml_dsa_signature',
-  'signature_key_id',
-  'signature_algorithm',
-  'attestation',
-])
-
-const CDRO_ENVELOPE_FIELD_SET: ReadonlySet<string> = new Set(CDRO_ENVELOPE_FIELDS)
-
-/**
- * Build the OID content core of a CDRO: the object with EXACTLY the six
- * detached-signature / envelope fields removed at the top level, everything
- * else kept. Non-object inputs are returned unchanged so callers that pass a
- * pre-stripped body stay in control of what enters the hash.
- */
-function cdroContentCore(value: unknown): unknown {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return value
-  }
-  const obj = value as Record<string, unknown>
-  const core: Record<string, unknown> = {}
-  for (const key of Object.keys(obj)) {
-    if (!CDRO_ENVELOPE_FIELD_SET.has(key)) {
-      core[key] = obj[key]
-    }
-  }
-  return core
-}
-
 /**
  * Compute the OID of a GAP CDRO.
  *

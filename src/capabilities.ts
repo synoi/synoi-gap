@@ -741,13 +741,23 @@ export interface LcaRootBody {
 export function capabilityMatches(pattern: string, target: string): boolean {
   if (pattern === target) return true
   if (pattern === '*') return true   // match-all
-  // M-8: Two wildcard levels.
-  // 'prefix.**' matches all descendants recursively (the prefix itself OR any
-  // path under it). Must be checked before '.*' because '.**' ends with '.*'.
-  if (pattern.endsWith('.**')) {
-    const prefix = pattern.slice(0, -3)  // strip '.**'
-    return target === prefix || target.startsWith(prefix + '.')
-  }
+  // NO '.**' LEVEL. A recursive wildcard used to live here: 'prefix.**' matched
+  // the prefix itself plus everything below it. It was removed because it made
+  // this matcher disagree with @synoi/sraid capabilityCovers - the normative
+  // one, and the one the gateway enforces with - in the PERMISSIVE direction:
+  //
+  //   held='platform.**'  required='platform.impersonate.start'
+  //     sraid  false   ('platform.**' does not end with '.*', so nothing matches)
+  //     gap    true
+  //
+  // A grant of 'platform.**' was therefore near-omnipotent when checked here
+  // and completely inert when checked there, with the verdict decided by which
+  // package a code path happened to call. Nothing used it: a scan of gap,
+  // gateway, portal, control, app and conformance found '.**' only in this
+  // function and its own comments - no grant, vector, fixture or test.
+  //
+  // If a recursive level is ever genuinely needed it must be added to
+  // @synoi/sraid FIRST, with vectors, and adopted here from there.
   // Segment-boundary wildcard: 'skill.*' matches 'skill.create' (direct
   // children only -- single path segment). A non-boundary pattern like
   // 'admin.us*' must NOT prefix-match 'admin.users.delete' (privilege-

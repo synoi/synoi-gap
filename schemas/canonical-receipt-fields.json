@@ -12,6 +12,7 @@
   ],
   "optional_fields": [
     "action_payload_hash",
+    "approver_ref",
     "cited_oracle_inputs",
     "decision_subject_oid",
     "degraded",

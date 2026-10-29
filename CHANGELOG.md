@@ -7,7 +7,15 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- `approver_ref` in `schemas/canonical-receipt-fields.json` `optional_fields` (E6 / G-11).
+  A scalar string (sorted-key compact JSON of `decided_by`, `hitl_id`,
+  `parent_receipt_id`, `signer_source`, `signer_device_id`, `signer_key_id`, `v`)
+  that puts the human approver of a HITL decision inside the signed receipt
+  bytes. Omit-when-absent, so every receipt without it keeps byte-identical
+  canonical bytes. synoi-gateway (src/verify-router.ts) and synoi-control
+  (src/receipts/verify-signature.ts) vendor the same addition.
 
 ## [1.1.0] - 2026-07-03
 

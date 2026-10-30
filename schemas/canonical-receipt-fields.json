@@ -31,6 +31,26 @@
     "target_class",
     "target_id"
   ],
+  "approver_ref_members": {
+    "$comment": "Shape of the approver_ref canonical field, which is a SCALAR STRING: compact JSON, keys sorted, absent/null members omitted. It is signed as that string, so adding members never changes the canonical bytes of a receipt whose stored approver_ref lacks them, and a verifier never parses it to check a signature. This block is documentation for auditors and other implementations; it is not part of the drift tripwire (only legacy_required_fields + optional_fields are). v1 (E6 / G-11) members appear on every approver_ref. v2 (E6-03) is emitted only when an approved-request hash is involved; a v1 approver_ref is byte-identical to what pre-E6-03 producers wrote.",
+    "v1": [
+      "decided_by",
+      "hitl_id",
+      "parent_receipt_id",
+      "signer_device_id",
+      "signer_key_id",
+      "signer_source",
+      "v"
+    ],
+    "v2_adds": [
+      "approved_request_sha256",
+      "presented_request_sha256",
+      "reason"
+    ],
+    "approved_request_sha256": "Lowercase hex sha256 over the RFC 8785 JCS text of exactly {tool, target, arguments, scope, expiry, decision_id}: target in canonical form or null, arguments {} when absent, expiry integer unix ms, decision_id the decided HITL request id. Computed by the gateway from the request it recorded when the approval was raised, never from the approving client. On an approval decision receipt it is what was approved; on an invoke deny receipt it is the approval that was presented.",
+    "presented_request_sha256": "Invoke deny receipts only: the same hash recomputed from the request actually presented at invoke, under the approval's expiry and decision_id. Absent when the presented request could not be canonicalized.",
+    "reason": "Invoke deny receipts only: request_hash_mismatch | approval_consumed | approval_expired | invalid_request."
+  },
   "hybrid_required": false,
   "hybrid_required_note": "Whether the RECEIPT SIGNATURE SCHEME requires the ML-DSA-65 hybrid component to be present for a receipt to verify (not a per-field flag). Currently false: an Ed25519-only signature is still accepted for pre-K1 receipts. Gateway's own cutover check (isPostCutoverDowngrade, src/verify-router.ts) already hard-fails a post-K1 Ed25519-only receipt at the gateway's own /verify surface. synoi-control currently verifies Ed25519 only at its ingest gate (src/receipts/verify-signature.ts, documented, deliberately out of scope for the canonical-field-drift fix that added this file) -- ML-DSA-65 verification at the control ingest gate is a separate follow-up. When that ships, flip this flag to true and update control's verifyReceiptBlob to also check ml_dsa_signature."
 }

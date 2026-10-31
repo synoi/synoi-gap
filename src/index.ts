@@ -150,6 +150,24 @@ export type {
   RevocationTargetKind,
 } from './revocations.js'
 
+// -- Agent + owner registry (schemas/agent.json) -----------------------------
+export {
+  AGENT_KINDS,
+  AGENT_STATUSES,
+  AGENT_EVENTS,
+  OWNERLESS_REASONS,
+  isAgentKind,
+} from './agents.js'
+export type {
+  Agent,
+  AgentKind,
+  AgentStatus,
+  AgentEventKind,
+  AgentOwnerEvent,
+  OwnerlessAgentFinding,
+  OwnerlessReason,
+} from './agents.js'
+
 // -- Constants ---------------------------------------------------------------
 export {
   CHANNEL_DESKTOP_OVERLAY,

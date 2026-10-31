@@ -16,6 +16,17 @@ Versioning: [Semantic Versioning](https://semver.org/)
   bytes. Omit-when-absent, so every receipt without it keeps byte-identical
   canonical bytes. synoi-gateway (src/verify-router.ts) and synoi-control
   (src/receipts/verify-signature.ts) vendor the same addition.
+- `schemas/receipt-versions.json`: the hosted Decision Receipt version registry
+  as data. Per-version signed-field lists for `hosted-v1.0` (no `degraded`),
+  `hosted-v1.1` (`degraded` signed, absent = false) and `hosted-v1.2`, plus the
+  `degraded_reason` codes with their grades and the `integrity_grade` enum
+  (A-D). `hosted-v1.2` signs `schema_version: "hosted-v1.2"`, the computed
+  `degraded` (required), `integrity_grade` (required) and `degraded_reason`
+  (exactly when degraded), and reserves two optional signed fields for the
+  agent registry: `agent_id` and `owner_oid` (absent when unknown, signed when
+  present). `canonical-receipt-fields.json` is unchanged; its version-1 lists
+  equal `hosted-v1.0` / `hosted-v1.1` here, pinned by
+  `test/receipt-versions-schema.test.ts`.
 
 ## [1.1.0] - 2026-07-03
 

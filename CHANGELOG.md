@@ -105,3 +105,8 @@ Versioning: [Semantic Versioning](https://semver.org/)
 - B6: `granted_by` unbound: binding rules documented in IMPLEMENTING.md Section 4.2
 - B7: negative numeric bounds bypass: scope evaluation rule documented; negative values MUST be denied for physical_safety=true
 - B8: two-person integrity with no HTTP path: `authorized_approvers` field added; `/revoke/approve` endpoint documented
+
+## C1 (2026-11-01, unreleased): `hosted-v1.4` receipt version
+
+- `schemas/receipt-versions.json`: new entry `hosted-v1.4` (`current`), the approver-bound hosted receipt. It is the `hosted-v1.3` field list plus `approver_oid`, which is required: the enrolled operator OID (`oid-` + 64 lowercase hex) of the human who made the approval decision the receipt records (Desk spec v1 section 9). `grant_oid` is optional in it (ASSUMED). The name `hosted-v1.4` is ASSUMED.
+- New top-level `refused_when_unsigned: ["approver_oid"]`. A verifier must FAIL a receipt that carries `approver_oid` under a version that does not sign it (`hosted-v1.0` to `hosted-v1.3`), not just warn. No earlier version's list changes.

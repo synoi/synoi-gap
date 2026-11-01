@@ -13,7 +13,9 @@
  *     already checks against;
  *   - hosted-v1.2 = hosted-v1.1 + schema_version, integrity_grade (required),
  *     degraded_reason, agent_id, owner_oid (optional);
- *   - the reason codes, their grades, and the grade enum.
+ *   - the reason codes, their grades, and the grade enum;
+ *   - (F2) six reason codes, not seven, and hosted-v1.3 = hosted-v1.2 with
+ *     grant_oid required.
  *
  * Style copies the gateway test harness: standalone tsx script, manual ok().
  */
@@ -64,8 +66,8 @@ const sorted = (a: readonly string[]): boolean => same(a, [...a].sort())
 
 ok('format_version is 1', reg.format_version === 1, reg.format_version)
 ok('family is hosted-flat', reg.family === 'hosted-flat', reg.family)
-ok('versions are hosted-v1.0, hosted-v1.1, hosted-v1.2 in order',
-   same(reg.versions.map((v) => v.id), ['hosted-v1.0', 'hosted-v1.1', 'hosted-v1.2']),
+ok('versions are hosted-v1.0, hosted-v1.1, hosted-v1.2, hosted-v1.3 in order',
+   same(reg.versions.map((v) => v.id), ['hosted-v1.0', 'hosted-v1.1', 'hosted-v1.2', 'hosted-v1.3']),
    reg.versions.map((v) => v.id))
 ok('unversioned receipts try hosted-v1.1 then hosted-v1.0',
    same(reg.unversioned_order, ['hosted-v1.1', 'hosted-v1.0']), reg.unversioned_order)
@@ -112,8 +114,30 @@ for (const f of ['schema_version', 'integrity_grade', 'degraded_reason', 'agent_
      ![...v10.required_fields, ...v10.optional_fields, ...v11.required_fields, ...v11.optional_fields].includes(f))
 }
 
+// ── hosted-v1.3 (F2): grant-bound ────────────────────────────────────────────
+// grant_oid was already an optional signed field of every version. hosted-v1.3
+// is the hosted-v1.2 field set with grant_oid REQUIRED; a receipt carrying a
+// grant (A2A delegation) uses it, every other receipt stays hosted-v1.2.
+const v13 = byId['hosted-v1.3']
+ok('hosted-v1.3 exists', v13 !== undefined)
+if (v13) {
+  ok('hosted-v1.3 schema_version is "hosted-v1.3"', v13.schema_version === 'hosted-v1.3', v13.schema_version)
+  ok('hosted-v1.3 status current', v13.status === 'current', v13.status)
+  ok('hosted-v1.3 degraded is required', v13.degraded_rule === 'required', v13.degraded_rule)
+  ok('hosted-v1.3 required == hosted-v1.2 required + grant_oid',
+     same(v13.required_fields, [...v12.required_fields, 'grant_oid'].sort()), v13.required_fields)
+  ok('hosted-v1.3 optional == hosted-v1.2 optional minus grant_oid',
+     same(v13.optional_fields, v12.optional_fields.filter((f) => f !== 'grant_oid')), v13.optional_fields)
+  ok('hosted-v1.3 signs the same 31 fields as hosted-v1.2',
+     same([...v13.required_fields, ...v13.optional_fields].sort(), [...v12.required_fields, ...v12.optional_fields].sort()))
+  ok('grant_oid is optional in every earlier version (signed when present since T14)',
+     [v10, v11, v12].every((v) => v.optional_fields.includes('grant_oid')))
+}
+
 // ── enums ────────────────────────────────────────────────────────────────────
 ok('integrity_grades == A, B, C, D', same(reg.integrity_grades, ['A', 'B', 'C', 'D']), reg.integrity_grades)
+// F2 (Joshua, Oct 31): six codes. trust_token_unverified is folded into
+// trust_token_absent (same grade B). Unreleased v1.2 vocabulary, not a version.
 const EXPECTED_CODES: Record<string, string> = {
   manifest_missing:       'D',
   modified_code:          'D',
@@ -121,10 +145,11 @@ const EXPECTED_CODES: Record<string, string> = {
   trust_token_absent:     'B',
   trust_token_expired:    'B',
   trust_token_flagged:    'C',
-  trust_token_unverified: 'B',
 }
-ok('degraded_reason_codes == the hosted-v1.2 codes and grades',
+ok('degraded_reason_codes == the six hosted-v1.2 codes and grades',
    JSON.stringify(reg.degraded_reason_codes) === JSON.stringify(EXPECTED_CODES), reg.degraded_reason_codes)
+ok('trust_token_unverified is not a code (folded into trust_token_absent)',
+   !Object.prototype.hasOwnProperty.call(reg.degraded_reason_codes, 'trust_token_unverified'))
 ok('degraded_reason_codes keys sorted', sorted(Object.keys(reg.degraded_reason_codes)))
 ok('no code grades A (A means not degraded)', Object.values(reg.degraded_reason_codes).every((g) => g !== 'A'))
 

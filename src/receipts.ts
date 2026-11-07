@@ -100,8 +100,14 @@ export interface GapDecisionReceiptBody {
    * C8: Optional nanoseconds since Unix epoch for sub-millisecond precision.
    * RECOMMENDED for financial.* capabilities. Complements decided_at_ms
    * (the spec's alias for resolved_at_ms) when nanosecond ordering matters.
+   *
+   * A non-negative DECIMAL STRING (e.g. "1762500000000000000"), not a number.
+   * A current time in nanoseconds is about 1.7e18, far past 2^53 - 1, so a
+   * JS number cannot hold it exactly and the canonicalizer rejects it
+   * (synoi-sraid SPEC.md Appendix A, DD-2). Build it from a BigInt and call
+   * `.toString()`.
    */
-  decided_at_ns?: number
+  decided_at_ns?: string
   /**
    * Item 3 [DESIGN]: Settled token consumption for this invocation. Populated
    * by the gateway post-invoke when the 'token_budget' precondition is active.

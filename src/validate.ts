@@ -972,7 +972,11 @@ export function validateGapDecisionReceiptBody(x: unknown): ValidationResult {
       'non-negative integer'))
   }
   if (x['decided_at_ns'] !== undefined) {
-    errors.push(optionalField('body', x, 'decided_at_ns', isInteger, 'integer'))
+    // A decimal string, not a number: nanosecond timestamps exceed 2^53 - 1
+    // (synoi-sraid SPEC.md Appendix A, DD-2).
+    errors.push(optionalField('body', x, 'decided_at_ns',
+      (v): v is string => isString(v) && /^(0|[1-9][0-9]*)$/.test(v),
+      'non-negative decimal string'))
   }
   // Item 3: token_consumption
   if (x['token_consumption'] !== undefined) {

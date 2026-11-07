@@ -283,6 +283,16 @@ const goodReceiptBody = {
   ok('receipt body: initiator missing actor_type => ok=false',
      !r.ok && r.errors.some((e) => e.includes('actor_type')))
 }
+// decided_at_ns is a decimal string, never a number (SRAID DD-2: ns exceeds 2^53 - 1).
+{
+  const r = validateGapDecisionReceiptBody({ ...goodReceiptBody, decided_at_ns: '1762500000000000123' })
+  ok('receipt body: decided_at_ns decimal string => ok=true', r.ok, r.errors.join('; '))
+}
+for (const bad of [1762500000000, '-5', '01', '1.5', '', 'abc'] as unknown[]) {
+  const r = validateGapDecisionReceiptBody({ ...goodReceiptBody, decided_at_ns: bad } as never)
+  ok(`receipt body: decided_at_ns ${JSON.stringify(bad)} => ok=false`,
+     !r.ok && r.errors.some((e) => e.includes('decided_at_ns')))
+}
 // [0024]: measured result block on the receipt body -- backward compatible.
 {
   const measured = {

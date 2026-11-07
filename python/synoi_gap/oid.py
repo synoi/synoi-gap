@@ -21,6 +21,7 @@ reference in src/canonicalize.ts and synoi-sraid/src/canonicalize.ts, RFC 8785 J
 - Arrays preserve element order; None elements are serialized as null.
 - Scalars (str, int, bool, None) round-trip through json.dumps(ensure_ascii=False).
   GAP 1.0 forbids float values; use integer minor units (e.g. cents) for money.
+  Integers must be within +/-(2^53 - 1); larger ones are rejected (SRAID DD-2).
 - Non-ASCII characters MUST be emitted as UTF-8 byte sequences, NOT as Unicode escapes.
   (json.dumps default uses ensure_ascii=True which produces \\uXXXX sequences; this
   implementation explicitly passes ensure_ascii=False to match JavaScript JSON.stringify.)
@@ -43,6 +44,9 @@ _EXCLUDED = frozenset({
     "signature_algorithm",
     "attestation",
 })
+
+# Largest integer an IEEE-754 double holds exactly: 2^53 - 1.
+_MAX_SAFE_INTEGER = 2**53 - 1
 
 
 def _canonical_value(obj: Any) -> str:
@@ -68,6 +72,16 @@ def _canonical_value(obj: Any) -> str:
             raise TypeError("GAP canonicalize: float values are not allowed; use integer minor units (e.g. cents). Got: inf")
         raise TypeError("GAP canonicalize: float values are not allowed; use integer minor units (e.g. cents)")
     if isinstance(obj, int):
+        # Integers must be within the IEEE-754 safe range, +/-(2^53 - 1)
+        # (synoi-sraid SPEC.md Appendix A, DD-2). Python keeps every digit of a
+        # larger integer while a JavaScript parser rounds it, so the two would
+        # hash different bytes for the same document. The TypeScript reference
+        # rejects these, so this side must too.
+        if obj > _MAX_SAFE_INTEGER or obj < -_MAX_SAFE_INTEGER:
+            raise TypeError(
+                f"GAP canonicalize: integer {obj} is outside the safe range "
+                "[-(2^53 - 1), 2^53 - 1]; encode it as a decimal string instead"
+            )
         return json.dumps(obj)
     if isinstance(obj, str):
         # ensure_ascii=False: emit non-ASCII as UTF-8, not \uXXXX escapes.

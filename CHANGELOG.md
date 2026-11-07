@@ -17,6 +17,20 @@ Versioning: [Semantic Versioning](https://semver.org/)
   canonical bytes. synoi-gateway (src/verify-router.ts) and synoi-control
   (src/receipts/verify-signature.ts) vendor the same addition.
 
+### Changed
+
+- **Python `canonicalize` rejects integers outside +/-(2^53 - 1)** with a
+  `TypeError`, matching the TypeScript side (which re-exports
+  `@synoi/sraid/canonicalize`) and synoi-sraid SPEC.md Appendix A, DD-2. Before
+  this, Python hashed a large integer exactly while JavaScript rounded it, so
+  the two disagreed on the OID. Output for every integer already in range is
+  unchanged.
+- **`GapDecisionReceiptBody.decided_at_ns` is now a decimal string**, not a
+  number, and the body validator requires `^(0|[1-9][0-9]*)$`. A nanosecond
+  timestamp (about 1.7e18) cannot be held exactly by a JS number and is rejected
+  by the canonicalizer. Type-level breaking for anyone setting it as a number;
+  no SynOI code populates the field today.
+
 ## [1.1.0] - 2026-07-03
 
 ### Added

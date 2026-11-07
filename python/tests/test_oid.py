@@ -386,7 +386,27 @@ def test_validate_accepts_integer_created_at_ms():
     )
 
 
+def test_canonical_safe_integer_bounds_accepted():
+    assert canonicalize(2**53 - 1) == "9007199254740991"
+    assert canonicalize(-(2**53 - 1)) == "-9007199254740991"
+    assert canonicalize(1762500000000) == "1762500000000"
+
+
+def test_canonical_unsafe_integer_raises():
+    # SRAID DD-2: the TypeScript reference rejects these, so Python must too,
+    # or the two would disagree on whether an object has an OID at all.
+    for value in (2**53, -(2**53), 10**21, 1762500000000000000, {"a": [1, 2**60]}):
+        raised = False
+        try:
+            canonicalize(value)
+        except TypeError:
+            raised = True
+        assert raised, f"Expected TypeError for unsafe integer input {value!r}"
+
+
 if __name__ == "__main__":
+    test_canonical_safe_integer_bounds_accepted()
+    test_canonical_unsafe_integer_raises()
     test_canonical_key_sort()
     test_canonical_none_kept_as_null_in_dict()
     test_canonical_nested()

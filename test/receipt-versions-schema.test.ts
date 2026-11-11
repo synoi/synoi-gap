@@ -15,7 +15,9 @@
  *     degraded_reason, agent_id, owner_oid (optional);
  *   - the reason codes, their grades, and the grade enum;
  *   - (F2) six reason codes, not seven, and hosted-v1.3 = hosted-v1.2 with
- *     grant_oid required.
+ *     grant_oid required;
+ *   - (C1) hosted-v1.4 = hosted-v1.3's list + approver_oid (required), and
+ *     approver_oid is refused when unsigned.
  *
  * Style copies the gateway test harness: standalone tsx script, manual ok().
  */
@@ -66,8 +68,8 @@ const sorted = (a: readonly string[]): boolean => same(a, [...a].sort())
 
 ok('format_version is 1', reg.format_version === 1, reg.format_version)
 ok('family is hosted-flat', reg.family === 'hosted-flat', reg.family)
-ok('versions are hosted-v1.0, hosted-v1.1, hosted-v1.2, hosted-v1.3 in order',
-   same(reg.versions.map((v) => v.id), ['hosted-v1.0', 'hosted-v1.1', 'hosted-v1.2', 'hosted-v1.3']),
+ok('versions are hosted-v1.0, hosted-v1.1, hosted-v1.2, hosted-v1.3, hosted-v1.4 in order',
+   same(reg.versions.map((v) => v.id), ['hosted-v1.0', 'hosted-v1.1', 'hosted-v1.2', 'hosted-v1.3', 'hosted-v1.4']),
    reg.versions.map((v) => v.id))
 ok('unversioned receipts try hosted-v1.1 then hosted-v1.0',
    same(reg.unversioned_order, ['hosted-v1.1', 'hosted-v1.0']), reg.unversioned_order)
@@ -133,6 +135,36 @@ if (v13) {
   ok('grant_oid is optional in every earlier version (signed when present since T14)',
      [v10, v11, v12].every((v) => v.optional_fields.includes('grant_oid')))
 }
+
+// ── hosted-v1.4 (C1): approver-bound ─────────────────────────────────────────
+// Desk spec v1 section 9: the human approver is inside the signed bytes.
+// hosted-v1.4 = the hosted-v1.3 field list + approver_oid (REQUIRED). grant_oid
+// is optional again (ASSUMED: most approval receipts carry no grant).
+// approver_oid is signed by no earlier version, and a receipt carrying it
+// under an earlier version is refused (refused_when_unsigned), not warned.
+const v14 = byId['hosted-v1.4']
+const reg14 = reg as unknown as { refused_when_unsigned?: string[] }
+ok('hosted-v1.4 exists', v14 !== undefined)
+if (v14 && v13) {
+  ok('hosted-v1.4 schema_version is "hosted-v1.4"', v14.schema_version === 'hosted-v1.4', v14.schema_version)
+  ok('hosted-v1.4 status current', v14.status === 'current', v14.status)
+  ok('hosted-v1.4 degraded is required', v14.degraded_rule === 'required', v14.degraded_rule)
+  ok('hosted-v1.4 required == hosted-v1.2 required + approver_oid',
+     same(v14.required_fields, [...v12.required_fields, 'approver_oid'].sort()), v14.required_fields)
+  ok('hosted-v1.4 optional == hosted-v1.2 optional (grant_oid optional)',
+     same(v14.optional_fields, v12.optional_fields), v14.optional_fields)
+  ok('hosted-v1.4 signs the hosted-v1.3 field list + approver_oid (32 fields)',
+     same([...v14.required_fields, ...v14.optional_fields].sort(),
+          [...v13.required_fields, ...v13.optional_fields, 'approver_oid'].sort()) &&
+     v14.required_fields.length + v14.optional_fields.length === 32)
+  ok('no earlier version signs approver_oid',
+     [v10, v11, v12, v13].every((v) => ![...v.required_fields, ...v.optional_fields].includes('approver_oid')))
+  const notes = (v14 as unknown as { field_notes?: Record<string, string> }).field_notes ?? {}
+  ok('hosted-v1.4 field_notes define approver_oid as the enrolled operator OID',
+     /operator/.test(notes['approver_oid'] ?? '') && /oid-/.test(notes['approver_oid'] ?? ''), notes['approver_oid'])
+}
+ok('refused_when_unsigned == ["approver_oid"]',
+   same(reg14.refused_when_unsigned ?? [], ['approver_oid']), reg14.refused_when_unsigned)
 
 // ── enums ────────────────────────────────────────────────────────────────────
 ok('integrity_grades == A, B, C, D', same(reg.integrity_grades, ['A', 'B', 'C', 'D']), reg.integrity_grades)

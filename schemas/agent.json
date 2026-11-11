@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synoi/synoi-gap/blob/main/schemas/agent.json",
+  "$comment": "A registered AI agent and its accountable owner, as a gateway's agent registry returns it (synoi-gateway GET /v1/account/agents). The owner is a person, named by an operator OID enrolled for the same tenant ('oid-' + sha256 of the operator's Ed25519 public key); it is not a role. Every owner event (owner_assigned, owner_changed, retired) is written as a signed hosted-v1.2 Decision Receipt whose signed agent_id and owner_oid name the agent and its owner, whose target_class is 'agent', and whose signed state_sha256 is sha256 of the event's state_json (so the previous owner and who made the change are covered by the signature). Receipts produced while an agent's bound credential is in use sign the same agent_id and owner_oid; see receipt-versions.json hosted-v1.2, where both stay OPTIONAL. The credential binding itself (a SHA-256 of the Bearer key) is never part of this shape. Vendored by synoi-gateway src/agents/registry.ts with a drift test (test/agent-owner-registry.test.ts). Read at TEST time only.",
+  "title": "Agent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent_id", "tenant_id", "name", "kind", "owner_oid", "status", "created_at", "retired_at", "credential_bound"],
+  "properties": {
+    "agent_id":         { "type": "string", "pattern": "^agt_[0-9a-f]{24}$", "description": "Gateway-issued, stable, never reused." },
+    "tenant_id":        { "type": "string", "minLength": 1 },
+    "name":             { "type": "string", "minLength": 1, "maxLength": 200 },
+    "kind":             { "$ref": "#/$defs/AgentKind" },
+    "owner_oid":        { "type": ["string", "null"], "pattern": "^oid-[0-9a-f]{64}$", "description": "The accountable person. null = no owner yet (an ownerless-agent finding)." },
+    "status":           { "$ref": "#/$defs/AgentStatus" },
+    "created_at":       { "type": "integer", "description": "Unix ms." },
+    "updated_at":       { "type": "integer", "description": "Unix ms of the last change." },
+    "retired_at":       { "type": ["integer", "null"], "description": "Unix ms; null while active." },
+    "credential_bound": { "type": "boolean", "description": "True when a gateway credential is bound to this agent, so its receipts carry agent_id / owner_oid." }
+  },
+  "$defs": {
+    "AgentKind": {
+      "type": "string",
+      "enum": ["claude-code", "cursor", "sdk", "openclaw", "hermes", "other"]
+    },
+    "AgentStatus": {
+      "type": "string",
+      "enum": ["active", "retired"]
+    },
+    "AgentOwnerEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "agent_id", "tenant_id", "previous_owner_oid", "owner_oid", "at", "receipt_id", "state_json"],
+      "properties": {
+        "event":              { "type": "string", "enum": ["owner_assigned", "owner_changed", "retired"] },
+        "agent_id":           { "type": "string", "pattern": "^agt_[0-9a-f]{24}$" },
+        "tenant_id":          { "type": "string", "minLength": 1 },
+        "previous_owner_oid": { "type": ["string", "null"] },
+        "owner_oid":          { "type": ["string", "null"] },
+        "at":                 { "type": "integer", "description": "Unix ms." },
+        "receipt_id":         { "type": ["string", "null"], "description": "The signed receipt for this event; null only if signing failed (the receipt is dead-lettered)." },
+        "state_json":         { "type": "string", "description": "Sorted-key compact JSON of {agent_id, at, changed_by, changed_by_agent_id, event, owner_oid, previous_owner_oid, status, tenant_id}. The receipt's signed state_sha256 is sha256(state_json)." }
+      }
+    },
+    "OwnerlessAgentFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "tenant_id", "name", "kind", "owner_oid", "reason", "created_at"],
+      "properties": {
+        "agent_id":   { "type": "string", "pattern": "^agt_[0-9a-f]{24}$" },
+        "tenant_id":  { "type": "string", "minLength": 1 },
+        "name":       { "type": "string" },
+        "kind":       { "$ref": "#/$defs/AgentKind" },
+        "owner_oid":  { "type": ["string", "null"], "description": "The recorded owner, if any (set when reason is owner_not_enrolled)." },
+        "reason":     { "type": "string", "enum": ["no_owner", "owner_not_enrolled"] },
+        "created_at": { "type": "integer" }
+      }
+    }
+  }
+}

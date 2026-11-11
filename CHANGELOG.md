@@ -27,6 +27,17 @@ Versioning: [Semantic Versioning](https://semver.org/)
   present). `canonical-receipt-fields.json` is unchanged; its version-1 lists
   equal `hosted-v1.0` / `hosted-v1.1` here, pinned by
   `test/receipt-versions-schema.test.ts`.
+- `schemas/agent.json` + `src/agents.ts` (`AGENT_KINDS`, `AGENT_STATUSES`,
+  `AGENT_EVENTS`, `OWNERLESS_REASONS`, `isAgentKind`, and the `Agent`,
+  `AgentOwnerEvent`, `OwnerlessAgentFinding` types): the agent + owner
+  registry shape. An agent (kind `claude-code`, `cursor`, `sdk`, `openclaw`,
+  `hermes` or `other`) names one accountable owner, an operator OID enrolled
+  for the same tenant (a person, not a role). Owner events (`owner_assigned`,
+  `owner_changed`, `retired`) are each a signed receipt; the "ownerless agent"
+  finding is `no_owner` or `owner_not_enrolled`. `agent_id` / `owner_oid`
+  stay OPTIONAL signed fields in `hosted-v1.2`. synoi-gateway
+  (`src/agents/registry.ts`) drift-tests against this file;
+  `test/agent-schema.test.ts` pins it.
 
 ## [1.1.0] - 2026-07-03
 

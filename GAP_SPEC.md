@@ -1013,8 +1013,10 @@ A conformant implementation MUST persist receipts for at least 90 days. Implemen
 
 ### 8.4 Receipt status set
 
-The status field records the outcome. Most values are self-explanatory. Two carry specific semantics:
+The status field records the outcome. It takes exactly one of eight values: `ok`, `denied`, `failed`, `deferred`, `timed_out`, `pending`, `rate_limited`, `refused_budget`. A validator MUST reject any other value. Most values are self-explanatory. Four carry specific semantics:
 
+- `pending` means the action is **waiting on a person**: a HITL stage has been reached and nobody has answered yet.
+- `deferred` means **a person chose to hold**: someone answered, and the answer was to postpone rather than allow or deny. The action does not proceed. A `deferred` receipt records a human decision; a `pending` receipt records the absence of one.
 - `refused_budget` is a **billing veto**, NOT a governance deny. It is emitted when a spend-cap or quota block stops an action for billing reasons. It maps to its own decision verb (`budget_refused`) so it never lands in the deny/authority corpus and never affects the authorized axis. A `refused_budget` receipt asserts "this was not billed/allowed to spend", not "this actor was denied authorization". Verifiers and auditors MUST treat it as distinct from `denied`.
 - `rate_limited` records that a rate limit stopped the action. Like `refused_budget`, it is an operational stop, not an authorization decision.
 

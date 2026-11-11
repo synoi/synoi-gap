@@ -51,6 +51,7 @@ import type {
   WorkflowInstanceBody,
 } from './workflows.js'
 import type {
+  DecisionStatus,
   GapDecisionReceipt,
   GapDecisionReceiptBody,
 } from './receipts.js'
@@ -914,6 +915,19 @@ export function validateChannelEventBody(x: unknown): ValidationResult {
   return merge(...errors)
 }
 
+/**
+ * GAP_SPEC §8.4 status set. Only ever widened: a status that once validated
+ * must keep validating, or previously issued receipts stop verifying.
+ */
+const DECISION_STATUSES = [
+  'ok', 'denied', 'failed', 'deferred', 'timed_out', 'pending',
+  'rate_limited', 'refused_budget',
+] as const satisfies readonly DecisionStatus[]
+
+// Compile-time tripwire: fails typecheck if DecisionStatus gains a value this list lacks.
+type MissingDecisionStatus = Exclude<DecisionStatus, (typeof DECISION_STATUSES)[number]>
+const DECISION_STATUSES_EXHAUSTIVE: [MissingDecisionStatus] extends [never] ? true : never = true
+
 export function validateGapDecisionReceiptBody(x: unknown): ValidationResult {
   if (!isObject(x)) return fail('body: expected object')
   const errors: ValidationResult[] = [
@@ -926,7 +940,7 @@ export function validateGapDecisionReceiptBody(x: unknown): ValidationResult {
       'DecisionSubjectKind'),
     requireField('body', x, 'subject_oid', isString, 'string'),
     requireField('body', x, 'status',
-      isOneOf(['ok', 'denied', 'failed', 'deferred', 'timed_out', 'pending'] as const),
+      isOneOf(DECISION_STATUSES),
       'DecisionStatus'),
     requireField('body', x, 'initiated_at_ms', isInteger, 'integer'),
     requireField('body', x, 'resolved_at_ms', isInteger, 'integer'),

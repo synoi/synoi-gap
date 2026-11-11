@@ -26,6 +26,10 @@ import {
   validateRevocationEvent,
   validateRevocationEventBody,
 } from '../src/index.js'
+import type { DecisionStatus } from '../src/index.js'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 let passed = 0, failed = 0
 function ok(label: string, cond: boolean, detail?: string): void {
@@ -277,6 +281,35 @@ const goodReceiptBody = {
   const r = validateGapDecisionReceiptBody({ ...goodReceiptBody, status: 'maybe' })
   ok('receipt body: bad status => ok=false',
      !r.ok && r.errors.some((e) => e.includes('status')))
+}
+// GAP_SPEC 8.4: all eight statuses validate. The first six are the pre-reconciliation
+// set and must keep validating so previously issued receipts still verify.
+{
+  const statuses: DecisionStatus[] = [
+    'ok', 'denied', 'failed', 'deferred', 'timed_out', 'pending',
+    'rate_limited', 'refused_budget',
+  ]
+  for (const status of statuses) {
+    const r = validateGapDecisionReceipt(envOk('gap:decision_receipt', { ...goodReceiptBody, status }))
+    ok(`receipt: status=${status} => ok=true`, r.ok, r.errors.join('; '))
+  }
+}
+// The spec, openapi.yaml and IMPLEMENTING.md must list the same eight statuses.
+{
+  const expected = 'ok,denied,failed,deferred,timed_out,pending,rate_limited,refused_budget'
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  const spec = readFileSync(join(root, 'GAP_SPEC.md'), 'utf8')
+  const specList = /exactly one of eight values: ([^.]+)\./.exec(spec)?.[1] ?? ''
+  ok('GAP_SPEC 8.4 status list matches DecisionStatus',
+     specList.replace(/[`\s]/g, '') === expected, specList)
+  const api = readFileSync(join(root, 'openapi.yaml'), 'utf8')
+  const enums = [...api.matchAll(/enum: \[(ok, [^\]]+)\]/g)].map((m) => m[1]!.replace(/\s/g, ''))
+  ok('openapi.yaml: both status enums match DecisionStatus',
+     enums.length === 2 && enums.every((e) => e === expected), enums.join(' | '))
+  const impl = readFileSync(join(root, 'IMPLEMENTING.md'), 'utf8')
+  const implList = /\*\*`status`\*\* values: ([^(]+)\(/.exec(impl)?.[1] ?? ''
+  ok('IMPLEMENTING.md status list matches DecisionStatus',
+     implList.replace(/[`\s]/g, '').replace(/,$/, '') === expected, implList)
 }
 {
   const r = validateGapDecisionReceiptBody({ ...goodReceiptBody, initiator: { actor_oid: 'actor:abc' } })

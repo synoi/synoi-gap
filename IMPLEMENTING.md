@@ -821,7 +821,7 @@ Every gate decision produces a `gap:decision_receipt` CDRO. This is the audit tr
 
 **`subject_kind`** values: `capability_invocation`, `stage_transition`, `grant_issued`, `grant_revoked`, `workflow_started`, `workflow_terminated`, `revocation_initiated`, `revocation_effective`, `federation_handshake` (reserved for GAP 1.1), `provisional_block`
 
-**`status`** values: `ok`, `denied`, `failed`, `deferred`, `timed_out`, `pending`
+**`status`** values: `ok`, `denied`, `failed`, `deferred`, `timed_out`, `pending`, `rate_limited`, `refused_budget` (GAP_SPEC 8.4). `pending` means waiting on a person; `deferred` means a person chose to hold.
 
 ### Receipt requirements (all tiers)
 
@@ -1277,7 +1277,7 @@ All routes are under `/v1/gap/`. Authentication: `Authorization: Bearer synoi-sk
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/gap/receipts/:oid` | Fetch a receipt by OID |
-| `GET` | `/v1/gap/receipts?actor_oid=&grant_oid=&capability=&from_ms=&to_ms=&status=&limit=&cursor=` | List receipts (paginated, all params optional; `status` = `ok\|denied\|deferred\|timed_out\|pending\|failed`) |
+| `GET` | `/v1/gap/receipts?actor_oid=&grant_oid=&capability=&from_ms=&to_ms=&status=&limit=&cursor=` | List receipts (paginated, all params optional; `status` = `ok\|denied\|failed\|deferred\|timed_out\|pending\|rate_limited\|refused_budget`) |
 
 The list endpoint returns receipts in reverse-chronological order with cursor-based pagination. Use for audit queries: "show all actions taken by actor X under grant Y in the last 24 hours."
 

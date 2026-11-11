@@ -401,7 +401,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [ok, denied, deferred, timed_out, pending, failed]
+            enum: [ok, denied, failed, deferred, timed_out, pending, rate_limited, refused_budget]
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
@@ -1545,7 +1545,10 @@ components:
 
     DecisionStatus:
       type: string
-      enum: [ok, denied, failed, deferred, timed_out, pending, rate_limited]
+      description: >-
+        GAP_SPEC 8.4. `pending` = waiting on a person; `deferred` = a person
+        chose to hold.
+      enum: [ok, denied, failed, deferred, timed_out, pending, rate_limited, refused_budget]
 
     GapDecisionReceiptBody:
       type: object

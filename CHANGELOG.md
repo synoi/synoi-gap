@@ -17,6 +17,17 @@ Versioning: [Semantic Versioning](https://semver.org/)
   canonical bytes. synoi-gateway (src/verify-router.ts) and synoi-control
   (src/receipts/verify-signature.ts) vendor the same addition.
 
+### Fixed
+
+- `DecisionStatus` lists reconciled to the eight values of GAP_SPEC 8.4 (`ok`,
+  `denied`, `failed`, `deferred`, `timed_out`, `pending`, `rate_limited`,
+  `refused_budget`). The TS type lacked `refused_budget`; `validateGapDecisionReceiptBody`
+  rejected `rate_limited` and `refused_budget`; `openapi.yaml` and `IMPLEMENTING.md`
+  carried shorter lists. The validator only widens, so every receipt that validated
+  before still validates; no OID, canonical-byte or `gap_version` change.
+- GAP_SPEC 8.4 now defines `pending` (waiting on a person) and `deferred` (a person
+  chose to hold).
+
 ## [1.1.0] - 2026-07-03
 
 ### Added

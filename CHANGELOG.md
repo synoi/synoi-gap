@@ -16,6 +16,14 @@ Versioning: [Semantic Versioning](https://semver.org/)
   bytes. Omit-when-absent, so every receipt without it keeps byte-identical
   canonical bytes. synoi-gateway (src/verify-router.ts) and synoi-control
   (src/receipts/verify-signature.ts) vendor the same addition.
+- `approver_ref_members` in `schemas/canonical-receipt-fields.json` (E6-03).
+  Documents the `approver_ref` member shape, including the v2 members
+  `approved_request_sha256` (sha256 over JCS of `{tool, target, arguments,
+  scope, expiry, decision_id}`, computed server-side) and, on invoke deny
+  receipts, `presented_request_sha256` and `reason`. Documentation only: the
+  signed field list (`legacy_required_fields` + `optional_fields`) is
+  unchanged, so neither vendored copy needs to change and no receipt's
+  canonical bytes move.
 - `schemas/receipt-versions.json`: the hosted Decision Receipt version registry
   as data. Per-version signed-field lists for `hosted-v1.0` (no `degraded`),
   `hosted-v1.1` (`degraded` signed, absent = false) and `hosted-v1.2`, plus the

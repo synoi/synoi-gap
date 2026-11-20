@@ -24,6 +24,11 @@ export type DecisionSubjectKind =
   | 'federation_handshake' // reserved for GAP 1.1 - not part of the active 1.0 conformance surface
   | 'provisional_block'
 
+/**
+ * The eight receipt statuses of GAP_SPEC §8.4. Keep in sync with
+ * DECISION_STATUSES in validate.ts and the DecisionStatus enum in openapi.yaml.
+ * `pending` = waiting on a person; `deferred` = a person chose to hold.
+ */
 export type DecisionStatus =
   | 'ok'
   | 'denied'
@@ -32,6 +37,7 @@ export type DecisionStatus =
   | 'timed_out'
   | 'pending'
   | 'rate_limited'
+  | 'refused_budget'
 
 export interface GapDecisionReceiptBody {
   subject_kind: DecisionSubjectKind

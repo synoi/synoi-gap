@@ -24,6 +24,39 @@ Versioning: [Semantic Versioning](https://semver.org/)
   signed field list (`legacy_required_fields` + `optional_fields`) is
   unchanged, so neither vendored copy needs to change and no receipt's
   canonical bytes move.
+- `schemas/receipt-versions.json`: the hosted Decision Receipt version registry
+  as data. Per-version signed-field lists for `hosted-v1.0` (no `degraded`),
+  `hosted-v1.1` (`degraded` signed, absent = false) and `hosted-v1.2`, plus the
+  `degraded_reason` codes with their grades and the `integrity_grade` enum
+  (A-D). `hosted-v1.2` signs `schema_version: "hosted-v1.2"`, the computed
+  `degraded` (required), `integrity_grade` (required) and `degraded_reason`
+  (exactly when degraded), and reserves two optional signed fields for the
+  agent registry: `agent_id` and `owner_oid` (absent when unknown, signed when
+  present). `canonical-receipt-fields.json` is unchanged; its version-1 lists
+  equal `hosted-v1.0` / `hosted-v1.1` here, pinned by
+  `test/receipt-versions-schema.test.ts`.
+- `schemas/agent.json` + `src/agents.ts` (`AGENT_KINDS`, `AGENT_STATUSES`,
+  `AGENT_EVENTS`, `OWNERLESS_REASONS`, `isAgentKind`, and the `Agent`,
+  `AgentOwnerEvent`, `OwnerlessAgentFinding` types): the agent + owner
+  registry shape. An agent (kind `claude-code`, `cursor`, `sdk`, `openclaw`,
+  `hermes` or `other`) names one accountable owner, an operator OID enrolled
+  for the same tenant (a person, not a role). Owner events (`owner_assigned`,
+  `owner_changed`, `retired`) are each a signed receipt; the "ownerless agent"
+  finding is `no_owner` or `owner_not_enrolled`. `agent_id` / `owner_oid`
+  stay OPTIONAL signed fields in `hosted-v1.2`. synoi-gateway
+  (`src/agents/registry.ts`) drift-tests against this file;
+  `test/agent-schema.test.ts` pins it.
+
+### Fixed
+
+- `DecisionStatus` lists reconciled to the eight values of GAP_SPEC 8.4 (`ok`,
+  `denied`, `failed`, `deferred`, `timed_out`, `pending`, `rate_limited`,
+  `refused_budget`). The TS type lacked `refused_budget`; `validateGapDecisionReceiptBody`
+  rejected `rate_limited` and `refused_budget`; `openapi.yaml` and `IMPLEMENTING.md`
+  carried shorter lists. The validator only widens, so every receipt that validated
+  before still validates; no OID, canonical-byte or `gap_version` change.
+- GAP_SPEC 8.4 now defines `pending` (waiting on a person) and `deferred` (a person
+  chose to hold).
 
 ## [1.1.0] - 2026-07-03
 
@@ -102,3 +135,8 @@ Versioning: [Semantic Versioning](https://semver.org/)
 - B6: `granted_by` unbound: binding rules documented in IMPLEMENTING.md Section 4.2
 - B7: negative numeric bounds bypass: scope evaluation rule documented; negative values MUST be denied for physical_safety=true
 - B8: two-person integrity with no HTTP path: `authorized_approvers` field added; `/revoke/approve` endpoint documented
+
+## C1 (2026-11-01, unreleased): `hosted-v1.4` receipt version
+
+- `schemas/receipt-versions.json`: new entry `hosted-v1.4` (`current`), the approver-bound hosted receipt. It is the `hosted-v1.3` field list plus `approver_oid`, which is required: the enrolled operator OID (`oid-` + 64 lowercase hex) of the human who made the approval decision the receipt records (Desk spec v1 section 9). `grant_oid` is optional in it (ASSUMED). The name `hosted-v1.4` is ASSUMED.
+- New top-level `refused_when_unsigned: ["approver_oid"]`. A verifier must FAIL a receipt that carries `approver_oid` under a version that does not sign it (`hosted-v1.0` to `hosted-v1.3`), not just warn. No earlier version's list changes.
